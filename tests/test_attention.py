@@ -30,6 +30,13 @@ def apply_skip_head_mid(d: torch.Tensor, head_splits: Tuple[int, int, int]):
     d_mid = torch.zeros((m, num_heads, mid), dtype=d.dtype, device=d.device)
     return torch.cat([d_left, d_mid, d_right], dim=2).view(m, -1)
 
+    
+def enumerate_gemm_skip_head_mid():
+    for kernel_type in get_kernel_types(dtype=torch.float8_e4m3fn):
+        for m in (128, 4096):
+            for n, k in [(32768, 512), (8192, 512)]:
+                yield kernel_type, m, n, k
+
 
 def test_gemm_skip_head_mid() -> None:
     print('Testing GEMM skip head mid:')
@@ -38,27 +45,25 @@ def test_gemm_skip_head_mid() -> None:
     major_a, major_b = MajorTypeAB.KMajor,  MajorTypeAB.KMajor
     out_dtype, accumulate = torch.bfloat16, False
 
-    for kernel_type in get_kernel_types(dtype=torch.float8_e4m3fn):
-        for m in (128, 4096):
-            for n, k in [(32768, 512), (8192, 512)]:
-                kernel_opt = f'1D1D' if kernel_type.is_1d1d() else '1D2D'
-                use_ue8m0 = get_ue8m0_usage(kernel_type)
-                disable_ue8m0_cast = not use_ue8m0
+    for kernel_type, m, n, k in enumerate_gemm_skip_head_mid():
+        kernel_opt = f'1D1D' if kernel_type.is_1d1d() else '1D2D'
+        use_ue8m0 = get_ue8m0_usage(kernel_type)
+        disable_ue8m0_cast = not use_ue8m0
 
-                a, b, _, d, ref_d = generate_normal(m, n, k, major_a, major_b, accumulate, out_dtype, kernel_type, use_ue8m0=use_ue8m0)
-                d = apply_skip_head_mid(d, head_splits)
-                ref_d = apply_skip_head_mid(ref_d, head_splits)
+        a, b, _, d, ref_d = generate_normal(m, n, k, major_a, major_b, accumulate, out_dtype, kernel_type, use_ue8m0=use_ue8m0)
+        d = apply_skip_head_mid(d, head_splits)
+        ref_d = apply_skip_head_mid(ref_d, head_splits)
 
-                deep_gemm.fp8_gemm_nt_skip_head_mid(a, b, d, head_splits, disable_ue8m0_cast=disable_ue8m0_cast)
-                diff = calc_diff(d, ref_d)
-                assert diff < 0.001, f'{m=}, {n=}, {k=}, {kernel_opt}, {diff:.5f}'
+        deep_gemm.fp8_gemm_nt_skip_head_mid(a, b, d, head_splits, disable_ue8m0_cast=disable_ue8m0_cast)
+        diff = calc_diff(d, ref_d)
+        assert diff < 0.001, f'{m=}, {n=}, {k=}, {kernel_opt}, {diff:.5f}'
 
-                t = bench_kineto(lambda: deep_gemm.fp8_gemm_nt_skip_head_mid(a, b, d, head_splits, disable_ue8m0_cast=disable_ue8m0_cast),
-                                 'gemm_', suppress_kineto_output=True)
-                print(f' > Perf (m={m:5}, n={n:5}, k={k:5}, {kernel_opt}): '
-                      f'{t * 1e6:4.0f} us | '
-                      f'{2 * m * n * k / t / 1e12:4.0f} TFLOPS | '
-                      f'{(count_bytes(a, b, d)) / 1e9 / t:4.0f} GB/s')
+        t = bench_kineto(lambda: deep_gemm.fp8_gemm_nt_skip_head_mid(a, b, d, head_splits, disable_ue8m0_cast=disable_ue8m0_cast),
+                         'gemm_', suppress_kineto_output=True)
+        print(f' > Perf (m={m:5}, n={n:5}, k={k:5}, {kernel_opt}): '
+              f'{t * 1e6:4.0f} us | '
+              f'{2 * m * n * k / t / 1e12:4.0f} TFLOPS | '
+              f'{(count_bytes(a, b, d)) / 1e9 / t:4.0f} GB/s')
     print()
 
 
@@ -113,6 +118,28 @@ def ref_fp8_mqa_logits(q: torch.Tensor, kv: torch.Tensor, weights: torch.Tensor,
     return logits, cost
 
 
+def enumerate_mqa_logits():
+    # Formats: 'fp8' (per-KV float scale), 'mxfp4' / 'mxfp8' (per-32 block scale, SM100 only)
+    fmts = ('mxfp4', 'mxfp8', 'fp8') if get_arch_major() == 10 else ('fp8', )
+    for fmt in fmts:
+        is_mxfp4 = fmt == 'mxfp4'
+        for logits_dtype in (torch.bfloat16, torch.float):
+            for weights_dtype in ((torch.float, torch.bfloat16) if get_arch_major() == 10 else (torch.float, )):
+                if weights_dtype == torch.bfloat16 and logits_dtype == torch.float:
+                    continue
+                for compressed_logits, clean_logits in [(False, True), (True, False)]:
+                    for seq_len in (2048, 8192):
+                        for seq_len_kv in (8192, 65536):
+                            head_dims = (64, 128) if is_mxfp4 else (32, 64, 128)
+                            heads = (8, 16, 32, 64) if get_arch_major() == 10 else (32, 64)
+                            for num_heads in heads:
+                                for head_dim in head_dims:
+                                    for disable_cp in (False, True):
+                                        if not disable_cp and (seq_len_kv % seq_len != 0 or seq_len % 2 != 0):
+                                            continue
+                                        yield fmt, logits_dtype, weights_dtype, compressed_logits, clean_logits, seq_len, seq_len_kv, num_heads, head_dim, disable_cp
+
+
 def test_mqa_logits():
 
     # Helper functions
@@ -132,27 +159,6 @@ def test_mqa_logits():
             ke[i] = cp_id * chunk_size + i
             ke[i + chunk_size] = (cp_size * 2 - 1 - cp_id) * chunk_size + i
         return ks, ke
-
-    def enumerate_mqa_logits():
-        # Formats: 'fp8' (per-KV float scale), 'mxfp4' / 'mxfp8' (per-32 block scale, SM100 only)
-        fmts = ('mxfp4', 'mxfp8', 'fp8') if get_arch_major() == 10 else ('fp8', )
-        for fmt in fmts:
-            is_mxfp4 = fmt == 'mxfp4'
-            for logits_dtype in (torch.bfloat16, torch.float):
-                for weights_dtype in ((torch.float, torch.bfloat16) if get_arch_major() == 10 else (torch.float, )):
-                    if weights_dtype == torch.bfloat16 and logits_dtype == torch.float:
-                        continue
-                    for compressed_logits, clean_logits in [(False, True), (True, False)]:
-                        for seq_len in (2048, 8192):
-                            for seq_len_kv in (8192, 65536):
-                                head_dims = (64, 128) if is_mxfp4 else (32, 64, 128)
-                                heads = (8, 16, 32, 64) if get_arch_major() == 10 else (32, 64)
-                                for num_heads in heads:
-                                    for head_dim in head_dims:
-                                        for disable_cp in (False, True):
-                                            if not disable_cp and (seq_len_kv % seq_len != 0 or seq_len % 2 != 0):
-                                                continue
-                                            yield fmt, logits_dtype, weights_dtype, compressed_logits, clean_logits, seq_len, seq_len_kv, num_heads, head_dim, disable_cp
 
     print('Testing FP8/MXFP4/MXFP8 MQA Logits:')
     for fmt, logits_dtype, weights_dtype, compressed_logits, clean_logits, seq_len, seq_len_kv, num_heads, head_dim, disable_cp in sample_mqa_cases('prefill', list(enumerate_mqa_logits())):
@@ -284,6 +290,34 @@ def ref_paged_mqa_logits(q: torch.Tensor, kv_cache: torch.Tensor,
     return logits
 
 
+def enumerate_paged_mqa_logits():
+    arch_major = get_arch_major()
+    max_kv_pool_tokens = 32 * 1024 * 1024
+    max_varlen_tokens = 16 * 1024
+    for is_varlen in ((False, True) if arch_major == 10 else (False, )):
+        for fmt in (('mxfp4', 'mxfp8', 'fp8') if arch_major == 10 else ('fp8', )):
+            is_mxfp4 = fmt == 'mxfp4'
+            for logits_dtype in (torch.bfloat16, torch.float):
+                for weights_dtype in ((torch.float, torch.bfloat16) if arch_major == 10 else (torch.float, )):
+                    if weights_dtype == torch.bfloat16 and logits_dtype == torch.float:
+                        continue
+                    for block_kv in ((128, 32, 64, ) if arch_major == 10 else (64, )):
+                        for use_2d_context_lens, clean_logits in [(True, False)]:
+                            for batch_size in (256, 4096):
+                                for next_n in ((1, ) if is_varlen else ((1, 6) if arch_major == 10 else (1, 2))):
+                                    for max_tokens_per_batch in ((6, 10) if is_varlen else (1, )):
+                                        heads = (8, 16, 32, 64) if arch_major == 10 else (32, 64)
+                                        head_dims = (64, 128) if is_mxfp4 else ((32, 64, 128) if arch_major == 10 else (128, ))
+                                        for num_heads in heads:
+                                            for head_dim in head_dims:
+                                                for avg_kv in (8192, 65536):
+                                                    if batch_size * avg_kv > max_kv_pool_tokens:
+                                                        continue
+                                                    if is_varlen and batch_size * max_tokens_per_batch > max_varlen_tokens:
+                                                        continue
+                                                    yield is_varlen, fmt, logits_dtype, weights_dtype, block_kv, use_2d_context_lens, clean_logits, batch_size, next_n, max_tokens_per_batch, num_heads, head_dim, avg_kv
+
+
 def test_paged_mqa_logits():
 
     # Helper functions
@@ -321,33 +355,6 @@ def test_paged_mqa_logits():
         x_fp8[ :, : block_size * head_dim] = x_scaled.view(num_blocks, block_size * head_dim).view(torch.uint8)
         x_fp8[ :, block_size * head_dim :] = sf.view(num_blocks, block_size).view(torch.uint8)
         return x_fp8.view(num_blocks, block_size, num_heads, head_dim + 4), x_cast_back.to(x.dtype)
-
-    def enumerate_paged_mqa_logits():
-        arch_major = get_arch_major()
-        max_kv_pool_tokens = 32 * 1024 * 1024
-        max_varlen_tokens = 16 * 1024
-        for is_varlen in ((False, True) if arch_major == 10 else (False, )):
-            for fmt in (('mxfp4', 'mxfp8', 'fp8') if arch_major == 10 else ('fp8', )):
-                is_mxfp4 = fmt == 'mxfp4'
-                for logits_dtype in (torch.bfloat16, torch.float):
-                    for weights_dtype in ((torch.float, torch.bfloat16) if arch_major == 10 else (torch.float, )):
-                        if weights_dtype == torch.bfloat16 and logits_dtype == torch.float:
-                            continue
-                        for block_kv in ((128, 32, 64, ) if arch_major == 10 else (64, )):
-                            for use_2d_context_lens, clean_logits in [(True, False)]:
-                                for batch_size in (256, 4096):
-                                    for next_n in ((1, ) if is_varlen else ((1, 6) if arch_major == 10 else (1, 2))):
-                                        for max_tokens_per_batch in ((6, 10) if is_varlen else (1, )):
-                                            heads = (8, 16, 32, 64) if arch_major == 10 else (32, 64)
-                                            head_dims = (64, 128) if is_mxfp4 else ((32, 64, 128) if arch_major == 10 else (128, ))
-                                            for num_heads in heads:
-                                                for head_dim in head_dims:
-                                                    for avg_kv in (8192, 65536):
-                                                        if batch_size * avg_kv > max_kv_pool_tokens:
-                                                            continue
-                                                        if is_varlen and batch_size * max_tokens_per_batch > max_varlen_tokens:
-                                                            continue
-                                                        yield is_varlen, fmt, logits_dtype, weights_dtype, block_kv, use_2d_context_lens, clean_logits, batch_size, next_n, max_tokens_per_batch, num_heads, head_dim, avg_kv
 
 
     print('Testing FP8/MXFP4/MXFP8 Paged MQA Logits:')
