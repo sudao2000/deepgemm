@@ -1,0 +1,260 @@
+[gemm #0] (<KernelType.Kernel1D2D: 1>, 128, 32768, 512)
+Testing GEMM skip head mid:
+ > Perf (m=  128, n=32768, k=  512, 1D2D):   13 us |  339 TFLOPS | 2156 GB/s
+
+
+Warning: please use at least NVCC 12.9 for the best DeepGEMM performance
+[gemm #1] (<KernelType.Kernel1D2D: 1>, 128, 8192, 512)
+Testing GEMM skip head mid:
+ > Perf (m=  128, n= 8192, k=  512, 1D2D):    6 us |  194 TFLOPS | 1247 GB/s
+
+
+Warning: please use at least NVCC 12.9 for the best DeepGEMM performance
+[mqa #0] ('fp8', torch.bfloat16, torch.float32, False, True, 2048, 8192, 32, 32, False)
+Testing FP8/MXFP4/MXFP8 MQA Logits:
+ > prefill: running 1/1 cases
+ > Fmt=fp8  , Logits=BF16, Reduce=FP32, CMP=0, SQ=2048, SK= 8192, H=32, D= 32, CP=1:  288 TFLOPS,   60 us,  326 GB/s, 17.5 relu/cyc/SM | clean:  10 us, 1608 GB/s
+
+
+Warning: please use at least NVCC 12.9 for the best DeepGEMM performance
+Same functionality as test_attention.py, but cases can be run one by one.
+
+Only the enumerate functions of test_attention.py are reused/patched: an index
+number is mapped to the selected case, and the original test body runs it.
+
+Usage:
+    python tests/test_attention_one.py                      # show help
+    python tests/test_attention_one.py <suite>              # list all cases of a suite
+    python tests/test_attention_one.py <suite> 0            # run case 0
+    python tests/test_attention_one.py <suite> 0 2 5        # run cases 0, 2 and 5
+    python tests/test_attention_one.py <suite> all          # run all cases (same as test_attention.py)
+
+Suites: gemm (test_gemm_skip_head_mid), mqa (test_mqa_logits), paged (test_paged_mqa_logits)
+[paged #0] (False, 'fp8', torch.bfloat16, torch.float32, 64, True, False, 256, 1, 1, 32, 128, 8192)
+Testing FP8/MXFP4/MXFP8 Paged MQA Logits:
+ > paged: running 1/1 cases
+ > Fmt=fp8  , Logits=BF16, Reduce=FP32, VAR=0, PAGE_KV=64, BSZ= 256, NextN = 1, H=32, D=128, L= 8192:  163 TFLOPS,  109 us, 2682 GB/s,  2.5 relu/cyc/SM
+
+
+Warning: please use at least NVCC 12.9 for the best DeepGEMM performance
+[paged #1] (False, 'fp8', torch.bfloat16, torch.float32, 64, True, False, 256, 1, 1, 32, 128, 65536)
+Testing FP8/MXFP4/MXFP8 Paged MQA Logits:
+ > paged: running 1/1 cases
+ > Fmt=fp8  , Logits=BF16, Reduce=FP32, VAR=0, PAGE_KV=64, BSZ= 256, NextN = 1, H=32, D=128, L=65536:  180 TFLOPS,  755 us, 2942 GB/s,  2.7 relu/cyc/SM
+
+
+Warning: please use at least NVCC 12.9 for the best DeepGEMM performance
+[gemm #0] (<KernelType.KernelNoSF: 2>, None, 1, 2112, 7168, <MajorTypeAB.KMajor: 0>, <MajorTypeAB.KMajor: 0>, False, torch.bfloat16)
+Testing GEMM:
+ > Perf (m=     1, n=  2112, k=  7168, layout=NT, BF16, acc=0):    18.3 us |    2 TFLOPS | 1653 GB/s | 0.99x cuBLAS
+Average speedup over cuBLASLt: 0.986x
+
+
+Warning: please use at least NVCC 12.9 for the best DeepGEMM performance
+[gemm #1] (<KernelType.KernelNoSF: 2>, None, 1, 2112, 7168, <MajorTypeAB.KMajor: 0>, <MajorTypeAB.KMajor: 0>, True, torch.bfloat16)
+Testing GEMM:
+ > Perf (m=     1, n=  2112, k=  7168, layout=NT, BF16, acc=1):    18.4 us |    2 TFLOPS | 1648 GB/s | 1.01x cuBLAS
+Average speedup over cuBLASLt: 1.008x
+
+
+Warning: please use at least NVCC 12.9 for the best DeepGEMM performance
+[m_contiguous #0] (<KernelType.KernelNoSF: 2>, None, 4, 8192, 6144, 7168, <MajorTypeAB.KMajor: 0>, <MajorTypeAB.KMajor: 0>, True, False)
+Testing m-grouped contiguous GEMM:
+ > Perf (num_groups=4, m=35456, n= 6144, k= 7168, layout=NT, psum=True, zero_pad=False): 3806 us |  821 TFLOPS |  341 GB/s
+
+
+Warning: please use at least NVCC 12.9 for the best DeepGEMM performance
+[m_contiguous #1] (<KernelType.KernelNoSF: 2>, None, 4, 8192, 6144, 7168, <MajorTypeAB.KMajor: 0>, <MajorTypeAB.MNMajor: 1>, True, False)
+Testing m-grouped contiguous GEMM:
+ > Perf (num_groups=4, m=35456, n= 6144, k= 7168, layout=NN, psum=True, zero_pad=False): 3809 us |  820 TFLOPS |  340 GB/s
+
+
+Warning: please use at least NVCC 12.9 for the best DeepGEMM performance
+[m_masked #0] (<KernelType.KernelNoSF: 2>, None, 32, 4096, 192, 6144, 7168, True)
+Testing m-grouped masked GEMM:
+ > Perf (num_groups=32, expected_m_per_group= 192, n=6144, k=7168, psum=1): 1083 us (max: 1086 us) |  504 TFLOPS | 2754 GB/s
+
+
+Warning: please use at least NVCC 12.9 for the best DeepGEMM performance
+[m_masked #1] (<KernelType.KernelNoSF: 2>, None, 32, 4096, 192, 7168, 3072, True)
+Testing m-grouped masked GEMM:
+ > Perf (num_groups=32, expected_m_per_group= 192, n=7168, k=3072, psum=1):  576 us (max: 577 us) |  474 TFLOPS | 2666 GB/s
+
+
+Warning: please use at least NVCC 12.9 for the best DeepGEMM performance
+[k_contiguous #0] (8, 768, 2048, <MajorTypeAB.MNMajor: 1>, <MajorTypeAB.MNMajor: 1>, [157, 109, 155, 127, 155, 101, 143, 163], [256, 128, 256, 128, 256, 128, 256, 256], 128, 128, 128, False)
+Testing k-grouped contiguous GEMM:
+ > Perf (num_groups= 8, m=  768, n= 2048, k= 1664, align=128, psum=0):   52 us |  100 TFLOPS | 2107 GB/s
+
+
+Warning: please use at least NVCC 12.9 for the best DeepGEMM performance
+[k_contiguous #1] (4, 4096, 7168, <MajorTypeAB.MNMajor: 1>, <MajorTypeAB.MNMajor: 1>, [7142, 7518, 10550, 8634], [7168, 7552, 10624, 8704], 8192, 128, 128, False)
+Testing k-grouped contiguous GEMM:
+ > Perf (num_groups= 4, m= 4096, n= 7168, k=34048, align=128, psum=0): 2774 us |  721 TFLOPS |  615 GB/s
+
+
+Warning: please use at least NVCC 12.9 for the best DeepGEMM performance
+[cublaslt #0] (<KernelType.KernelNoSF: 2>, None, 1, 2112, 7168, <MajorTypeAB.KMajor: 0>, <MajorTypeAB.KMajor: 0>, False, torch.bfloat16)
+Testing cuBLASLt GEMM:
+ > Perf (m=     1, n=  2112, k=  7168, layout=NT, BF16, acc=0):    17 us |    2 TFLOPS | 1826 GB/s
+
+
+[cublaslt #1] (<KernelType.KernelNoSF: 2>, None, 1, 2112, 7168, <MajorTypeAB.KMajor: 0>, <MajorTypeAB.KMajor: 0>, True, torch.bfloat16)
+Testing cuBLASLt GEMM:
+ > Perf (m=     1, n=  2112, k=  7168, layout=NT, BF16, acc=1):    17 us |    2 TFLOPS | 1820 GB/s
+
+
+[bmk_bnk_mn #0] (129, 128, 384, 128, torch.float32)
+Testing "bmk, bnk -> mn":
+ > Perf (b= 129, m=128, n=384, k=128, FP32):    25 us |   65 TFLOPS |  683 GB/s
+
+
+Warning: please use at least NVCC 12.9 for the best DeepGEMM performance
+[bmk_bnk_mn #1] (129, 128, 384, 128, torch.bfloat16)
+Testing "bmk, bnk -> mn":
+ > Perf (b= 129, m=128, n=384, k=128, BF16):    20 us |   79 TFLOPS |  836 GB/s
+
+
+Warning: please use at least NVCC 12.9 for the best DeepGEMM performance
+[bhr_hdr_bhd #0] (128, 512, 128, 4)
+Testing "bhr, hdr -> bhd":
+ > Perf (b=   4, h=128, r=512, d=128):    11 us |    6 TFLOPS | 1584 GB/s | 0.97 x
+
+
+Warning: please use at least NVCC 12.9 for the best DeepGEMM performance
+[bhr_hdr_bhd #1] (128, 512, 128, 32)
+Testing "bhr, hdr -> bhd":
+ > Perf (b=  32, h=128, r=512, d=128):    13 us |   42 TFLOPS | 1737 GB/s | 0.99 x
+
+
+Warning: please use at least NVCC 12.9 for the best DeepGEMM performance
+[bhd_hdr_bhr #0] (128, 512, 128, 4)
+Testing "bhd, hdr -> bhr":
+ > Perf (b=   4, h=128, r=512, d=128):    11 us |    6 TFLOPS | 1599 GB/s | 0.96 x
+
+
+Warning: please use at least NVCC 12.9 for the best DeepGEMM performance
+[bhd_hdr_bhr #1] (128, 512, 128, 32)
+Testing "bhd, hdr -> bhr":
+ > Perf (b=  32, h=128, r=512, d=128):    12 us |   46 TFLOPS | 1888 GB/s | 0.97 x
+
+
+Warning: please use at least NVCC 12.9 for the best DeepGEMM performance
+[fp8_bhr_hdr_bhd #0] (8, 4096, 1024, 4)
+Testing FP8 "bhr, hdr -> bhd":
+ > Perf (b=   4, h=8, r=4096, d=1024):    19 us |   14 TFLOPS | 1788 GB/s | 1.71 x
+
+
+Warning: please use at least NVCC 12.9 for the best DeepGEMM performance
+[fp8_bhr_hdr_bhd #1] (8, 4096, 1024, 32)
+Testing FP8 "bhr, hdr -> bhd":
+ > Perf (b=  32, h=8, r=4096, d=1024):    19 us |  114 TFLOPS | 1874 GB/s | 1.76 x
+
+
+Warning: please use at least NVCC 12.9 for the best DeepGEMM performance
+[gemm #0] (<KernelType.Kernel1D2D: 1>, <generators.QuantConfig object at 0x73d0c91bc190>, 1, 2112, 7168, <MajorTypeAB.KMajor: 0>, <MajorTypeAB.KMajor: 0>, False, torch.bfloat16)
+Testing GEMM:
+ > Perf (m=     1, n=  2112, k=  7168, 1D2D, layout=NT, BF16, acc=0):   13.8 us |    2 TFLOPS | 1099 GB/s | 0.84x cuBLAS
+Average FP8xFP8 GEMM speedup over cuBLASLt: 0.840x
+
+
+Warning: please use at least NVCC 12.9 for the best DeepGEMM performance
+[gemm #1] (<KernelType.Kernel1D2D: 1>, <generators.QuantConfig object at 0x79bb46e0fd50>, 1, 576, 7168, <MajorTypeAB.KMajor: 0>, <MajorTypeAB.KMajor: 0>, False, torch.bfloat16)
+Testing GEMM:
+ > Perf (m=     1, n=   576, k=  7168, 1D2D, layout=NT, BF16, acc=0):    9.0 us |    1 TFLOPS |  461 GB/s | 0.83x cuBLAS
+Average FP8xFP8 GEMM speedup over cuBLASLt: 0.834x
+
+
+Warning: please use at least NVCC 12.9 for the best DeepGEMM performance
+[m_contiguous #0] (<KernelType.Kernel1D2D: 1>, <generators.QuantConfig object at 0x74d299ebcd50>, 4, 8192, 6144, 7168, <MajorTypeAB.KMajor: 0>, <MajorTypeAB.KMajor: 0>, True, False)
+Testing m-grouped contiguous GEMM:
+ > Perf (num_groups=4, m=35456, n=  6144, k= 7168, 1D2D, layout=NT, psum=True, zero_pad=False): 2510 us | 1244 TFLOPS |  348 GB/s
+
+
+Warning: please use at least NVCC 12.9 for the best DeepGEMM performance
+[m_contiguous #1] (<KernelType.Kernel1D2D: 1>, <generators.QuantConfig object at 0x72d6a4dbdbd0>, 4, 8192, 7168, 3072, <MajorTypeAB.KMajor: 0>, <MajorTypeAB.KMajor: 0>, True, False)
+Testing m-grouped contiguous GEMM:
+ > Perf (num_groups=4, m=35456, n=  7168, k= 3072, 1D2D, layout=NT, psum=True, zero_pad=False): 1301 us | 1200 TFLOPS |  545 GB/s
+
+
+Warning: please use at least NVCC 12.9 for the best DeepGEMM performance
+[m_masked #0] (<KernelType.Kernel1D2D: 1>, <generators.QuantConfig object at 0x73d6bd279fd0>, 32, 4096, 192, 6144, 7168, True)
+Testing m-grouped masked GEMM:
+ > Perf (num_groups=32, expected_m_per_group= 192, n=6144, k=7168, 1D2D, psum=1):  631 us (max: 637 us) |  865 TFLOPS | 2427 GB/s
+
+
+Warning: please use at least NVCC 12.9 for the best DeepGEMM performance
+[m_masked #1] (<KernelType.Kernel1D2D: 1>, <generators.QuantConfig object at 0x7c06e7d7b410>, 32, 4096, 192, 7168, 3072, True)
+Testing m-grouped masked GEMM:
+ > Perf (num_groups=32, expected_m_per_group= 192, n=7168, k=3072, 1D2D, psum=1):  339 us (max: 342 us) |  804 TFLOPS | 2396 GB/s
+
+
+Warning: please use at least NVCC 12.9 for the best DeepGEMM performance
+[k_contiguous #0] (8, 768, 2048, <MajorTypeAB.KMajor: 0>, <MajorTypeAB.KMajor: 0>, [154, 147, 121, 109, 128, 120, 149, 112], [256, 256, 128, 128, 128, 128, 256, 128], 128, 128, 128, False)
+Testing k-grouped contiguous GEMM:
+ > Perf (num_groups= 8, m=  768, n= 2048, k= 1408, gran_k=128, k_alignment=128, psum=0):   55 us |   80 TFLOPS | 1895 GB/s
+
+
+Warning: please use at least NVCC 12.9 for the best DeepGEMM performance
+[k_contiguous #1] (4, 4096, 7168, <MajorTypeAB.KMajor: 0>, <MajorTypeAB.KMajor: 0>, [8076, 8601, 10197, 8215], [8192, 8704, 10240, 8320], 8192, 128, 128, False)
+Testing k-grouped contiguous GEMM:
+ > Perf (num_groups= 4, m= 4096, n= 7168, k=35456, gran_k=128, k_alignment=128, psum=0): 2417 us |  861 TFLOPS |  559 GB/s
+
+
+Warning: please use at least NVCC 12.9 for the best DeepGEMM performance
+[#0] m=13, n=24, k=28672, num_splits=None
+ > Perf (m=   13, n=   24, k=28672, num_splits= 0):  107 us |    0 TFLOPS |   33 GB/s
+
+Warning: please use at least NVCC 12.9 for the best DeepGEMM performance
+[sf #0] (4096, 128, True, False, 1, 128)
+Testing SF layout kernels:
+ > Perf (num_groups= 1, mn= 4096, k=  128, transpose=1, use_ue8m0=0, gran_k=128):    2 us |   20 GB/s
+
+
+Warning: please use at least NVCC 12.9 for the best DeepGEMM performance
+[sf #1] (4096, 128, True, False, 2, 128)
+Testing SF layout kernels:
+ > Perf (num_groups= 2, mn= 4096, k=  128, transpose=1, use_ue8m0=0, gran_k=128):    2 us |   37 GB/s
+
+
+Warning: please use at least NVCC 12.9 for the best DeepGEMM performance
+[k_grouped #0] (4096, [1536, 1536, 1920, 2688, 2432, 1920, 1536, 2176, 2304, 2432, 1664, 1920, 1792, 1920, 2048, 2432], 16, 128)
+Testing k-grouped SF layout kernels:
+ > Perf (num_groups= 16, mn= 4096, sum_k=32256, gran_k=128):   6 us |  869 GB/s
+
+
+Warning: please use at least NVCC 12.9 for the best DeepGEMM performance
+[k_grouped #1] (4096, [3072, 4096, 5376, 4608, 4352, 4736, 3712, 3712], 8, 128)
+Testing k-grouped SF layout kernels:
+ > Perf (num_groups=  8, mn= 4096, sum_k=33664, gran_k=128):   6 us |  969 GB/s
+
+
+Warning: please use at least NVCC 12.9 for the best DeepGEMM performance
+[psum #0] (4096, [2688, 1984, 1920, 1728, 1536, 2112, 1536, 2752, 1920, 1856, 2688, 1728, 2432, 1984, 2048, 2624], [2688, 1984, 1920, 1728, 1536, 2112, 1536, 2752, 1920, 1856, 2688, 1728, 2432, 1984, 2048, 2624], [2688, 4672, 6592, 8320, 9856, 11968, 13504, 16256, 18176, 20032, 22720, 24448, 26880, 28864, 30912, 33536], 16, 128, 32)
+Testing k-grouped psum SF layout kernels:
+ > Skipped (psum SF pack kernel only supported on SM100)
+
+[psum #1] (4096, [1920, 2368, 1536, 2752, 2688, 2112, 2560, 1984, 1536, 2496, 2048, 2368, 2304, 2496, 2048, 2112], [1920, 2432, 1536, 2816, 2688, 2176, 2560, 2048, 1536, 2560, 2048, 2432, 2304, 2560, 2048, 2176], [1920, 4288, 5888, 8640, 11392, 13504, 16128, 18112, 19712, 22208, 24320, 26688, 29056, 31552, 33664, 35776], 16, 128, 128)
+Testing k-grouped psum SF layout kernels:
+ > Skipped (psum SF pack kernel only supported on SM100)
+
+[m_grouped #0] (<KernelType.KernelNoSF: 2>, None, 4, 8192, 6144, 7168, <MajorTypeAB.KMajor: 0>, <MajorTypeAB.KMajor: 0>, True, False)
+Testing m-grouped contiguous Triton GEMM:
+ > Perf (num_groups=4, m=40832, n= 6144, k= 7168, layout=NT): 5598 us |  642 TFLOPS |  257 GB/s
+
+
+[m_grouped #1] (<KernelType.KernelNoSF: 2>, None, 4, 8192, 6144, 7168, <MajorTypeAB.KMajor: 0>, <MajorTypeAB.MNMajor: 1>, True, False)
+Testing m-grouped contiguous Triton GEMM:
+ > Perf (num_groups=4, m=40832, n= 6144, k= 7168, layout=NN): 5242 us |  686 TFLOPS |  275 GB/s
+
+
+[k_grouped #0] (8, 768, 2048, <MajorTypeAB.MNMajor: 1>, <MajorTypeAB.MNMajor: 1>, [130, 133, 154, 109, 133, 136, 151, 118], [256, 256, 256, 128, 256, 256, 256, 128], 128, 128, 128, False)
+Testing k-grouped contiguous Triton GEMM:
+ > Perf (num_groups=8, m=  768, n= 2048, k= 1792, layout=TN):   56 us |  100 TFLOPS | 1070 GB/s
+
+
+[k_grouped #1] (4, 4096, 7168, <MajorTypeAB.MNMajor: 1>, <MajorTypeAB.MNMajor: 1>, [6165, 10581, 8657, 6515], [6272, 10624, 8704, 6528], 8192, 128, 128, False)
+Testing k-grouped contiguous Triton GEMM:
+ > Perf (num_groups=4, m= 4096, n= 7168, k=32128, layout=TN): 4517 us |  418 TFLOPS |  264 GB/s
+
+
