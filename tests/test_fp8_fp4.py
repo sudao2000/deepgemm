@@ -18,7 +18,8 @@ from generators import (
     enumerate_k_grouped_contiguous_test_variants,
     generate_normal, generate_m_grouped_contiguous, generate_m_grouped_masked, generate_k_grouped_contiguous,
     generate_k_grouped_contiguous_psum,
-    get_mk_alignment_for_contiguous_layout
+    get_mk_alignment_for_contiguous_layout,
+    print_kernel_io
 )
 
 
@@ -42,7 +43,10 @@ def test_gemm() -> None:
                 a = a if major_a.is_k_major() else (a[0].T, a[1].T)
                 b = b if major_b.is_k_major() else (b[0].T, b[1].T)
                 assert a[0].is_contiguous() and b[0].is_contiguous()
+            print_kernel_io(func_name, dict(a=a, b=b, c=c, disable_ue8m0_cast=disable_ue8m0_cast,
+                                              recipe=recipe, recipe_a=recipe_a, recipe_b=recipe_b), dict(d=d))
             getattr(deep_gemm, func_name)(a, b, d, c=c, disable_ue8m0_cast=disable_ue8m0_cast, recipe=recipe, recipe_a=recipe_a, recipe_b=recipe_b)
+            print_kernel_io(func_name, {}, dict(d=d))
             diff = calc_diff(d, ref_d)
             assert diff < quant_config.max_diff(), (f'{m=}, {n=}, {k=}, {kernel_opt}, {major_opt=}, {accumulate=}, {out_dtype=}, '
                                                     f'{diff:.5f}, alias={test_alias}')
@@ -85,9 +89,15 @@ def test_m_grouped_gemm_contiguous() -> None:
                 assert major_a.is_k_major()
                 b = b if major_b.is_k_major() else (b[0].mT, b[1].mT)
                 assert a[0].is_contiguous() and b[0].is_contiguous()
+            print_kernel_io(func_name, dict(a=a, b=b, grouped_layout=grouped_layout,
+                                            disable_ue8m0_cast=disable_ue8m0_cast,
+                                            use_psum_layout=use_psum_layout,
+                                            ensure_zero_padding=ensure_zero_padding,
+                                            recipe=recipe, recipe_a=recipe_a, recipe_b=recipe_b), dict(d=d))
             getattr(deep_gemm, func_name)(a, b, d, grouped_layout, disable_ue8m0_cast=disable_ue8m0_cast,
                                           use_psum_layout=use_psum_layout, ensure_zero_padding=ensure_zero_padding,
                                           recipe=recipe, recipe_a=recipe_a, recipe_b=recipe_b)
+            print_kernel_io(func_name, {}, dict(d=d))
             if use_psum_layout:
                 for j in range(num_groups):
                     start = 0 if j == 0 else align(grouped_layout[j - 1], get_mk_alignment_for_contiguous_layout())
@@ -148,12 +158,25 @@ def test_m_grouped_gemm_masked() -> None:
             # noinspection PyShadowingNames
             def test_func():
                 if use_psum_layout:
+                    print_kernel_io('m_grouped_fp8_fp4_gemm_nt_contiguous',
+                                    dict(a=a_psum, b=b, grouped_layout=psum_m,
+                                         disable_ue8m0_cast=disable_ue8m0_cast,
+                                         use_psum_layout=True,
+                                         expected_m_for_psum_layout=int(expected_m_per_group * 1.2),
+                                         recipe=recipe, recipe_a=recipe_a, recipe_b=recipe_b), dict(d=d_psum))
                     deep_gemm.m_grouped_fp8_fp4_gemm_nt_contiguous(a_psum, b, d_psum, psum_m, disable_ue8m0_cast=disable_ue8m0_cast,
                                                                    use_psum_layout=True, expected_m_for_psum_layout=int(expected_m_per_group * 1.2),
                                                                    recipe=recipe, recipe_a=recipe_a, recipe_b=recipe_b)
+                    print_kernel_io('m_grouped_fp8_fp4_gemm_nt_contiguous', {}, dict(d=d_psum))
                 else:
+                    print_kernel_io('m_grouped_fp8_fp4_gemm_nt_masked',
+                                    dict(a=a, b=b, masked_m=masked_m,
+                                         expected_m_per_group=int(expected_m_per_group * 1.2),
+                                         disable_ue8m0_cast=disable_ue8m0_cast,
+                                         recipe=recipe, recipe_a=recipe_a, recipe_b=recipe_b), dict(d=d))
                     deep_gemm.m_grouped_fp8_fp4_gemm_nt_masked(a, b, d, masked_m, int(expected_m_per_group * 1.2), disable_ue8m0_cast=disable_ue8m0_cast,
                                                                recipe=recipe, recipe_a=recipe_a, recipe_b=recipe_b)
+                    print_kernel_io('m_grouped_fp8_fp4_gemm_nt_masked', {}, dict(d=d))
 
             test_func()
             for j in range(num_groups):
@@ -198,7 +221,11 @@ def test_k_grouped_gemm_contiguous() -> None:
             else:
                 total_k, a, b, c, d, ref_d, grouped_layout, _ = generate_k_grouped_contiguous(num_groups, m, n, major_a, major_b, test_aligned_ks_cpu, use_ue8m0=use_ue8m0, gran_k=gran_k)
             c_orig = c.clone() if use_psum_layout else None
+            print_kernel_io('k_grouped_fp8_gemm_contiguous',
+                            dict(a=a, b=b, ks_cpu=test_aligned_ks_cpu, grouped_layout=grouped_layout, c=c,
+                                 recipe=recipe, use_psum_layout=use_psum_layout), dict(d=d))
             k_grouped_fp8_gemm_contiguous(a, b, d, test_aligned_ks_cpu, grouped_layout, c, recipe=recipe, use_psum_layout=use_psum_layout)
+            print_kernel_io('k_grouped_fp8_gemm_contiguous', {}, dict(d=d))
 
             diff = calc_diff(d, ref_d)
             assert diff < 0.001, f'{m=}, {n=}, {total_k=}, {test_real_ks_cpu=}, {test_aligned_ks_cpu=}, {use_psum_layout=}, {diff:.5f}'
@@ -206,14 +233,22 @@ def test_k_grouped_gemm_contiguous() -> None:
             # Unsynced psum paths
             if use_psum_layout:
                 c.copy_(c_orig)
+                print_kernel_io('k_grouped_fp8_gemm_contiguous',
+                                dict(a=a, b=b, ks_cpu=None, grouped_layout=grouped_layout, c=c,
+                                     recipe=recipe, use_psum_layout=True), dict(d=d))
                 k_grouped_fp8_gemm_contiguous(a, b, d, None, grouped_layout, c, recipe=recipe,
                                               use_psum_layout=True)
+                print_kernel_io('k_grouped_fp8_gemm_contiguous', {}, dict(d=d))
                 diff = calc_diff(d, ref_d)
                 assert diff < 0.001, f'None ks_cpu path: {m=}, {n=}, {total_k=}, {test_real_ks_cpu=}, {diff:.5f}'
 
                 c.copy_(c_orig)
+                print_kernel_io('k_grouped_fp8_gemm_contiguous',
+                                dict(a=a, b=b, ks_cpu=[], grouped_layout=grouped_layout, c=c,
+                                     recipe=recipe, use_psum_layout=True), dict(d=d))
                 k_grouped_fp8_gemm_contiguous(a, b, d, [], grouped_layout, c, recipe=recipe,
                                               use_psum_layout=True)
+                print_kernel_io('k_grouped_fp8_gemm_contiguous', {}, dict(d=d))
                 diff = calc_diff(d, ref_d)
                 assert diff < 0.001, f'empty ks_cpu path: {m=}, {n=}, {total_k=}, {test_real_ks_cpu=}, {diff:.5f}'
 

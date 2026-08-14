@@ -13,7 +13,7 @@ from deep_gemm.testing import (
 )
 from deep_gemm.utils import ceil_div, per_custom_dims_cast_to_fp8, per_token_cast_to_fp4, cast_back_from_fp4, per_token_cast_to_fp8, cast_back_from_fp8
 
-from generators import generate_normal, get_ue8m0_usage, get_kernel_types, MajorTypeAB
+from generators import generate_normal, get_ue8m0_usage, get_kernel_types, MajorTypeAB, print_kernel_io
 
 
 def apply_skip_head_mid(d: torch.Tensor, head_splits: Tuple[int, int, int]):
@@ -30,7 +30,7 @@ def apply_skip_head_mid(d: torch.Tensor, head_splits: Tuple[int, int, int]):
     d_mid = torch.zeros((m, num_heads, mid), dtype=d.dtype, device=d.device)
     return torch.cat([d_left, d_mid, d_right], dim=2).view(m, -1)
 
-    
+
 def enumerate_gemm_skip_head_mid():
     for kernel_type in get_kernel_types(dtype=torch.float8_e4m3fn):
         for m in (128, 4096):
@@ -54,7 +54,10 @@ def test_gemm_skip_head_mid() -> None:
         d = apply_skip_head_mid(d, head_splits)
         ref_d = apply_skip_head_mid(ref_d, head_splits)
 
+        print_kernel_io('fp8_gemm_nt_skip_head_mid',
+                        dict(a=a, b=b, d=d, head_splits=head_splits, disable_ue8m0_cast=disable_ue8m0_cast), {})
         deep_gemm.fp8_gemm_nt_skip_head_mid(a, b, d, head_splits, disable_ue8m0_cast=disable_ue8m0_cast)
+        print_kernel_io('fp8_gemm_nt_skip_head_mid', {}, dict(d=d))
         diff = calc_diff(d, ref_d)
         assert diff < 0.001, f'{m=}, {n=}, {k=}, {kernel_opt}, {diff:.5f}'
 
@@ -209,7 +212,9 @@ def test_mqa_logits():
             kernel_kwargs['max_seqlen_k'] = max_seqlen_k
 
         # Run kernel
+        print_kernel_io('fp8_fp4_mqa_logits', kernel_kwargs, {})
         logits = deep_gemm.fp8_fp4_mqa_logits(**kernel_kwargs)
+        print_kernel_io('fp8_fp4_mqa_logits', {}, dict(logits=logits))
 
         if compressed_logits:
             self_mask = torch.arange(logits.size(1), device='cuda')[None, :] < (ke - ks)[:, None]
@@ -458,7 +463,9 @@ def test_paged_mqa_logits():
             max_context_len=max_model_len, clean_logits=clean_logits, logits_dtype=logits_dtype,
             indices=indices,
         )
+        print_kernel_io('fp8_fp4_paged_mqa_logits', kernel_kwargs, {})
         logits = deep_gemm.fp8_fp4_paged_mqa_logits(**kernel_kwargs)
+        print_kernel_io('fp8_fp4_paged_mqa_logits', {}, dict(logits=logits))
 
         self_mask = ~ref_neginf_mask
         masked_logits = logits.masked_fill(~self_mask, 0)

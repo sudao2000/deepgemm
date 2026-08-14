@@ -9,6 +9,7 @@ from deep_gemm.testing import (
 from generators import (
     enumerate_m_grouped_contiguous, enumerate_k_grouped_contiguous,
     generate_m_grouped_contiguous, generate_k_grouped_contiguous,
+    print_kernel_io,
 )
 
 def test_m_grouped_gemm_contiguous_tl() -> None:    
@@ -27,9 +28,13 @@ def test_m_grouped_gemm_contiguous_tl() -> None:
                     assert a[0].is_contiguous() and b[0].is_contiguous()
                 if expand:
                     m_row_indices = torch.arange(0, m, dtype=torch.int32, device='cuda')
+                    print_kernel_io(func_name, dict(a=a, b=b, grouped_indices=(m_indices, m_row_indices)), dict(d=d))
                     getattr(deep_gemm.legacy, func_name)(a, b, d, (m_indices, m_row_indices))
+                    print_kernel_io(func_name, {}, dict(d=d))
                 else:
+                    print_kernel_io(func_name, dict(a=a, b=b, grouped_indices=m_indices), dict(d=d))
                     getattr(deep_gemm.legacy, func_name)(a, b, d, m_indices)
+                    print_kernel_io(func_name, {}, dict(d=d))
                 d = torch.where((m_indices == -1).unsqueeze(1), torch.zeros_like(d), d)
                 diff = calc_diff(d, ref_d)
                 assert diff < 0.001, f'{m=}, {n=}, {k=}, {major_opt}, {diff:.5f}, alias={test_alias}'
@@ -66,7 +71,9 @@ def test_k_grouped_gemm_contiguous_tl() -> None:
             for i, group_k in enumerate(aligned_ks_cpu):
                 k_start[i] = k_end[i-1] if i > 0 else 0
                 k_end[i] = k_start[i] + group_k
+            print_kernel_io(func_name, dict(a=a, b=b, c=c, grouped_indices=(k_indices, k_start, k_end), accumulate=True), dict(c=c))
             getattr(deep_gemm.legacy, func_name)(a, b, c, (k_indices, k_start, k_end), True)
+            print_kernel_io(func_name, {}, dict(c=c))
             diff = calc_diff(c, ref_d)
             assert diff < 0.001, f'{m=}, {n=}, {k=}, {major_opt}, {diff:.5f}'
         k, a, b, c, d, ref_d, _, _ = generate_k_grouped_contiguous(num_groups, m, n, major_a, major_b, aligned_ks_cpu, use_ue8m0=False, use_bf16=True)

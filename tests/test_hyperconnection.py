@@ -8,7 +8,7 @@ from deep_gemm.testing import (
     calc_diff, count_bytes
 )
 from deep_gemm.utils import align
-from generators import get_arch_major
+from generators import get_arch_major, print_kernel_io
 
 
 @test_filter(lambda: get_arch_major() >= 9)
@@ -27,7 +27,9 @@ def test_hc_prenorm_gemm() -> None:
                         torch.empty((num_splits, m, n), dtype=torch.float, device='cuda')
                 s = torch.empty((m, ), dtype=torch.float, device='cuda') if num_splits is None else \
                         torch.empty((num_splits, m), dtype=torch.float, device='cuda')
+                print_kernel_io('tf32_hc_prenorm_gemm', dict(a=a, b=b, num_splits=num_splits), dict(d=d, s=s))
                 deep_gemm.tf32_hc_prenorm_gemm(a, b, d, s, num_splits=num_splits)
+                print_kernel_io('tf32_hc_prenorm_gemm', {}, dict(d=d, s=s))
                 final_d = d if num_splits is None else d.sum(0)
                 final_s = s if num_splits is None else s.sum(0)
 

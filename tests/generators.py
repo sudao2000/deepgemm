@@ -38,6 +38,23 @@ class MajorTypeAB(enum.Enum):
 
     def is_mn_major(self):
         return self.value == 1
+
+
+def _fmt_param(v):
+    if isinstance(v, torch.Tensor):
+        return f'Tensor(shape={tuple(v.shape)}, dtype={v.dtype})'
+    if isinstance(v, (tuple, list)):
+        return '(' + ', '.join(_fmt_param(x) for x in v) + ')'
+    return repr(v)
+
+
+def print_kernel_io(kernel_name: str, inputs: dict, outputs: dict):
+    print(f' > [IO] {kernel_name} inputs:')
+    for name, value in inputs.items():
+        print(f' > [IO]   {name} = {_fmt_param(value)}')
+    print(f' > [IO] {kernel_name} outputs:')
+    for name, value in outputs.items():
+        print(f' > [IO]   {name} = {_fmt_param(value)}')
     
 
 class QuantConfig:
