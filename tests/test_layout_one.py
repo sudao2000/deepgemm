@@ -60,7 +60,7 @@ def main() -> None:
     selected = [cases[i] for i in indices]
     setattr(test_layout, enum_name, lambda *a, **kw: iter(selected))
     for i, case in zip(indices, selected):
-        print(f'[{name} #{i}] {case}')
+        print(f'[test_layout {name} #{i}] {case}')
     test_fn()
     print()
 

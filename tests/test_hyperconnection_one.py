@@ -74,7 +74,7 @@ def main() -> None:
 
     for i in indices:
         m, n, k, num_splits = cases[i]
-        print(f'[#{i}] m={m}, n={n}, k={k}, num_splits={num_splits}')
+        print(f'test_hyperconnection [#{i}] m={m}, n={n}, k={k}, num_splits={num_splits}')
         run_case(m, n, k, num_splits)
     print()
 

@@ -49,12 +49,14 @@ def _fmt_param(v):
 
 
 def print_kernel_io(kernel_name: str, inputs: dict, outputs: dict):
-    print(f' > [IO] {kernel_name} inputs:')
-    for name, value in inputs.items():
-        print(f' > [IO]   {name} = {_fmt_param(value)}')
-    print(f' > [IO] {kernel_name} outputs:')
-    for name, value in outputs.items():
-        print(f' > [IO]   {name} = {_fmt_param(value)}')
+    print(f' {kernel_name} inputs:')
+    if inputs:
+        for name, value in inputs.items():
+            print(f'   {name} = {_fmt_param(value)}')
+    if outputs and len(inputs) > 0:
+        print(f' {kernel_name} outputs:')
+        for name, value in outputs.items():
+            print(f'   {name} = {_fmt_param(value)}')
     
 
 class QuantConfig:

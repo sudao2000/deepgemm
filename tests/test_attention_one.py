@@ -54,7 +54,7 @@ def main() -> None:
     selected = [cases[i] for i in indices]
     setattr(test_attention, enum_name, lambda: iter(selected))
     for i, case in zip(indices, selected):
-        print(f'[{name} #{i}] {case}')
+        print(f'[test_attention {name} #{i}] {case}')
     test_fn()
     print()
 

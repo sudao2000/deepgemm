@@ -61,7 +61,7 @@ def main() -> None:
     selected = [cases[i] for i in indices]
     setattr(test_einsum, enum_name, lambda *a, **kw: iter(selected))
     for i, case in zip(indices, selected):
-        print(f'[{name} #{i}] {case}')
+        print(f'[test_einsum {name} #{i}] {case}')
     test_fn()
     print()
 
