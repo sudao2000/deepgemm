@@ -302,17 +302,17 @@ def grouped_cast_fp8_fp4_with_major(x: torch.Tensor, major: MajorTypeAB, gran_k:
                                     use_ue8m0: bool, use_block_cast_for_fp8: bool = False):
     num_groups, mn, k = x.size()
     if is_fp4:
-        x_fp4 = (torch.empty((num_groups, mn, k // 2), device='cuda', dtype=torch.int8) if major.is_k_major() else \
-                 torch.empty((num_groups, k, mn // 2), device='cuda', dtype=torch.int8),
-                 torch.empty((num_groups, mn, ceil_div(k, gran_k)), device='cuda', dtype=torch.float))
+        x_fp4 = (torch.empty((num_groups, mn, k // 2), device='cpu', dtype=torch.int8) if major.is_k_major() else \
+                 torch.empty((num_groups, k, mn // 2), device='cpu', dtype=torch.int8),
+                 torch.empty((num_groups, mn, ceil_div(k, gran_k)), device='cpu', dtype=torch.float))
         for i in range(num_groups):
             x_i_fp4 = per_token_cast_to_fp4(x[i], use_ue8m0=use_ue8m0, gran_k=gran_k)
             x_fp4[0][i], x_fp4[1][i] = x_i_fp4 if major.is_k_major() else (transpose_packed_fp4(x_i_fp4[0]), x_i_fp4[1])
         return x_fp4 if major.is_k_major() else (x_fp4[0].mT, x_fp4[1])
     else:
         x_fp8 = (torch.empty_like(x, dtype=torch.float8_e4m3fn),
-                 torch.empty((num_groups, ceil_div(mn, gran_k), ceil_div(k, gran_k)), device='cuda', dtype=torch.float) if use_block_cast_for_fp8 \
-                 else torch.empty((num_groups, mn, ceil_div(k, gran_k)), device='cuda', dtype=torch.float))
+                 torch.empty((num_groups, ceil_div(mn, gran_k), ceil_div(k, gran_k)), device='cpu', dtype=torch.float) if use_block_cast_for_fp8 \
+                 else torch.empty((num_groups, mn, ceil_div(k, gran_k)), device='cpu', dtype=torch.float))
         for i in range(num_groups):
             x_fp8[0][i], x_fp8[1][i] = per_block_cast_to_fp8(x[i], use_ue8m0=use_ue8m0, gran_k=gran_k) if use_block_cast_for_fp8 \
                                        else per_token_cast_to_fp8(x[i], use_ue8m0=use_ue8m0, gran_k=gran_k)
@@ -325,10 +325,10 @@ def generate_normal(m: int, n: int, k: int,
                     kernel_type: KernelType,
                     use_ue8m0: bool = False, use_bf16: bool = False,
                     quant_config: Optional[QuantConfig] = None):
-    a = torch.randn((m, k), device='cuda', dtype=torch.bfloat16)
-    b = torch.randn((n, k), device='cuda', dtype=torch.bfloat16)
-    d = torch.randn((m, n), device='cuda', dtype=out_dtype) * 32 if accumulate else \
-        torch.empty((m, n), device='cuda', dtype=out_dtype)
+    a = torch.randn((m, k), device='cpu', dtype=torch.bfloat16)
+    b = torch.randn((n, k), device='cpu', dtype=torch.bfloat16)
+    d = torch.randn((m, n), device='cpu', dtype=out_dtype) * 32 if accumulate else \
+        torch.empty((m, n), device='cpu', dtype=out_dtype)
     c = d if accumulate else None
     ref_d = (a.float() @ b.float().t() + (c if accumulate else 0)).to(out_dtype)
 
@@ -354,12 +354,12 @@ def generate_m_grouped_contiguous(num_groups: int, expected_m_per_group: int, n:
     aligned_ms = [align(actual_m, get_mk_alignment_for_contiguous_layout()) for actual_m in actual_ms]
     m = sum(aligned_ms)
 
-    a = torch.randn((m, k), device='cuda', dtype=torch.bfloat16)
-    b = torch.randn((num_groups, n, k), device='cuda', dtype=torch.bfloat16)
-    grouped_layout = torch.empty(num_groups, device='cuda', dtype=torch.int32) if use_psum_layout \
-                     else torch.empty(m, device='cuda', dtype=torch.int32)
-    d = torch.empty((m, n), device='cuda', dtype=torch.bfloat16)
-    ref_d = torch.randn((m, n), device='cuda', dtype=torch.bfloat16)
+    a = torch.randn((m, k), device='cpu', dtype=torch.bfloat16)
+    b = torch.randn((num_groups, n, k), device='cpu', dtype=torch.bfloat16)
+    grouped_layout = torch.empty(num_groups, device='cpu', dtype=torch.int32) if use_psum_layout \
+                     else torch.empty(m, device='cpu', dtype=torch.int32)
+    d = torch.empty((m, n), device='cpu', dtype=torch.bfloat16)
+    ref_d = torch.randn((m, n), device='cpu', dtype=torch.bfloat16)
 
     start = 0
     for i, (actual_m, aligned_m) in enumerate(zip(actual_ms, aligned_ms)):
@@ -402,13 +402,13 @@ def generate_m_grouped_masked(num_groups: int, max_m: int, expected_m_per_group:
                               use_ue8m0: bool = False, use_bf16: bool = False,
                               use_psum_layout: bool = False,
                               quant_config: Optional[QuantConfig] = None):
-    a = torch.randn((num_groups, max_m, k), device='cuda', dtype=torch.bfloat16)
-    b = torch.randn((num_groups, n, k), device='cuda', dtype=torch.bfloat16)
-    d = torch.empty((num_groups, max_m, n), device='cuda', dtype=torch.bfloat16)
+    a = torch.randn((num_groups, max_m, k), device='cpu', dtype=torch.bfloat16)
+    b = torch.randn((num_groups, n, k), device='cpu', dtype=torch.bfloat16)
+    d = torch.empty((num_groups, max_m, n), device='cpu', dtype=torch.bfloat16)
     ref_d = torch.einsum('gmk,gnk->gmn', a, b)
 
-    masked_m = torch.empty((num_groups, ), device='cuda', dtype=torch.int)
-    psum_m = torch.empty((num_groups, ), device='cuda', dtype=torch.int)
+    masked_m = torch.empty((num_groups, ), device='cpu', dtype=torch.int)
+    psum_m = torch.empty((num_groups, ), device='cpu', dtype=torch.int)
     for j in range(num_groups):
         masked_m[j] = int(expected_m_per_group * random.uniform(0.7, 1.3))
         psum_m[j] = (0 if j == 0 else align(psum_m[j - 1], get_mk_alignment_for_contiguous_layout())) + masked_m[j]
@@ -457,11 +457,11 @@ def k_grouped_per_channel_cast_to_fp8(x: torch.Tensor, ks_cpu: List[int], use_ue
 def generate_k_grouped_contiguous(num_groups: int, m: int, n: int, major_a: MajorTypeAB, major_b: MajorTypeAB, ks_cpu: List[int],
                                   use_ue8m0: bool = False, use_bf16: bool = False, gran_k = 128):
     k = sum(ks_cpu)
-    grouped_layout = torch.tensor(ks_cpu, device='cuda', dtype=torch.int32)
+    grouped_layout = torch.tensor(ks_cpu, device='cpu', dtype=torch.int32)
 
-    a = torch.randn((k, m), device='cuda', dtype=torch.bfloat16)
-    b = torch.randn((k, n), device='cuda', dtype=torch.bfloat16)
-    c = torch.randn((num_groups, m, n), device='cuda', dtype=torch.float) * 32
+    a = torch.randn((k, m), device='cpu', dtype=torch.bfloat16)
+    b = torch.randn((k, n), device='cpu', dtype=torch.bfloat16)
+    c = torch.randn((num_groups, m, n), device='cpu', dtype=torch.float) * 32
     d = c
     ref_d = torch.empty_like(c)
 
@@ -525,9 +525,9 @@ def generate_k_grouped_contiguous_psum(num_groups: int, m: int, n: int,
     total_k = align(grouped_layout[-1] if num_groups > 0 else 0, k_alignment)
 
     # Keep padded K gaps zeroed
-    a = torch.zeros((total_k, m), device='cuda', dtype=torch.bfloat16)
-    b = torch.zeros((total_k, n), device='cuda', dtype=torch.bfloat16)
-    c = torch.randn((num_groups, m, n), device='cuda', dtype=torch.float) * 32
+    a = torch.zeros((total_k, m), device='cpu', dtype=torch.bfloat16)
+    b = torch.zeros((total_k, n), device='cpu', dtype=torch.bfloat16)
+    c = torch.randn((num_groups, m, n), device='cpu', dtype=torch.float) * 32
     d = c
     ref_d = torch.empty_like(c)
 
@@ -536,16 +536,28 @@ def generate_k_grouped_contiguous_psum(num_groups: int, m: int, n: int,
             ref_d[i] = c[i]
             continue
         start = grouped_layout[i] - k
-        a_g = torch.randn((k, m), device='cuda', dtype=torch.bfloat16)
-        b_g = torch.randn((k, n), device='cuda', dtype=torch.bfloat16)
+        a_g = torch.randn((k, m), device='cpu', dtype=torch.bfloat16)
+        b_g = torch.randn((k, n), device='cpu', dtype=torch.bfloat16)
         a[start:start + k] = a_g
         b[start:start + k] = b_g
         ref_d[i] = c[i] + (a_g.T @ b_g)
 
-    grouped_layout_tensor = torch.tensor(grouped_layout, device='cuda', dtype=torch.int32)
+    grouped_layout_tensor = torch.tensor(grouped_layout, device='cpu', dtype=torch.int32)
     if use_bf16:
         return total_k, a, b, c, d, ref_d, grouped_layout_tensor, aligned_ks
 
     a_fp8 = k_grouped_per_channel_cast_to_fp8(a, real_ks, use_ue8m0=use_ue8m0, gran_k=gran_k, group_ends=grouped_layout)
     b_fp8 = k_grouped_per_channel_cast_to_fp8(b, real_ks, use_ue8m0=use_ue8m0, gran_k=gran_k, group_ends=grouped_layout)
     return total_k, a_fp8, b_fp8, c, d, ref_d, grouped_layout_tensor, aligned_ks
+
+def to_device(obj, device: str = 'cuda'):
+    """Recursively move all tensors in tuples/lists to the specified CUDA device."""
+    if isinstance(obj, torch.Tensor):
+        return obj.to(device)
+    if isinstance(obj, tuple):
+        return tuple(to_device(item, device) for item in obj)
+    if isinstance(obj, list):
+        return [to_device(item, device) for item in obj]
+    if isinstance(obj, dict):
+        return {key: to_device(value, device) for key, value in obj.items()}
+    return obj

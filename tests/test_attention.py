@@ -13,7 +13,7 @@ from deep_gemm.testing import (
 )
 from deep_gemm.utils import ceil_div, per_custom_dims_cast_to_fp8, per_token_cast_to_fp4, cast_back_from_fp4, per_token_cast_to_fp8, cast_back_from_fp8
 
-from generators import generate_normal, get_ue8m0_usage, get_kernel_types, MajorTypeAB, print_kernel_io
+from generators import generate_normal, get_ue8m0_usage, get_kernel_types, MajorTypeAB, print_kernel_io, to_device
 
 
 def apply_skip_head_mid(d: torch.Tensor, head_splits: Tuple[int, int, int]):
@@ -56,13 +56,15 @@ def test_gemm_skip_head_mid() -> None:
 
         print_kernel_io('fp8_gemm_nt_skip_head_mid',
                         dict(a=a, b=b, d=d, head_splits=head_splits, disable_ue8m0_cast=disable_ue8m0_cast), {})
+        a, b, d, ref_d = to_device((a, b, d, ref_d), 'cuda')
         deep_gemm.fp8_gemm_nt_skip_head_mid(a, b, d, head_splits, disable_ue8m0_cast=disable_ue8m0_cast)
+        a, b, d, ref_d = to_device((a, b, d, ref_d), 'cpu')
         print_kernel_io('fp8_gemm_nt_skip_head_mid', {}, dict(d=d))
         diff = calc_diff(d, ref_d)
         assert diff < 0.001, f'{m=}, {n=}, {k=}, {kernel_opt}, {diff:.5f}'
 
         t = bench_kineto(lambda: deep_gemm.fp8_gemm_nt_skip_head_mid(a, b, d, head_splits, disable_ue8m0_cast=disable_ue8m0_cast),
-                         'gemm_', suppress_kineto_output=True)
+                         'gemm_', tensor_vars=('a', 'b', 'd'), suppress_kineto_output=True)
         print(f' > Perf (m={m:5}, n={n:5}, k={k:5}, {kernel_opt}): '
               f'{t * 1e6:4.0f} us | '
               f'{2 * m * n * k / t / 1e12:4.0f} TFLOPS | '
