@@ -291,8 +291,8 @@ def ref_paged_mqa_logits(q: torch.Tensor, kv_cache: torch.Tensor,
     context_lens = context_lens.tolist()
     for i in range(batch_size):
         context_len = context_lens[i]
-        q_offsets = torch.full((next_n, ), context_len, device='cuda', dtype=torch.int32) if use_2d_context_lens \
-            else torch.arange(context_len - next_n, context_len, device='cuda')
+        q_offsets = torch.full((next_n, ), context_len, device=q.device, dtype=torch.int32) if use_2d_context_lens \
+            else torch.arange(context_len - next_n, context_len, device=q.device)
         weight_slice = weights[i * next_n:(i + 1) * next_n, :].transpose(0, 1).contiguous()
 
         num_blocks = (context_len + block_size - 1) // block_size
@@ -389,17 +389,17 @@ def test_paged_mqa_logits():
         # Varlen: flatten raw_batch_size sequences with variable tokens into (batch_size, 1, ...)
         raw_batch_size, raw_next_n = batch_size, next_n
         if is_varlen:
-            tokens_per_seq = torch.randint(1, max_tokens_per_batch + 1, (raw_batch_size,), device='cuda', dtype=torch.int)
-            indices = torch.arange(raw_batch_size, device='cuda', dtype=torch.int).repeat_interleave(tokens_per_seq)
+            tokens_per_seq = torch.randint(1, max_tokens_per_batch + 1, (raw_batch_size,), device='cpu', dtype=torch.int)
+            indices = torch.arange(raw_batch_size, device='cpu', dtype=torch.int).repeat_interleave(tokens_per_seq)
             batch_size, next_n = tokens_per_seq.sum().item(), 1
         else:
             tokens_per_seq, indices = None, None
 
-        # Generate random inputs
-        q = torch.randn((batch_size, next_n, num_heads, head_dim), device='cuda', dtype=torch.bfloat16)
-        weights = torch.randn((batch_size * next_n, num_heads), device='cuda', dtype=torch.float)
+        # Generate random inputs on CPU; they are moved to CUDA only for the kernel call
+        q = torch.randn((batch_size, next_n, num_heads, head_dim), device='cpu', dtype=torch.bfloat16)
+        weights = torch.randn((batch_size * next_n, num_heads), device='cpu', dtype=torch.float)
         kernel_weights = weights.to(weights_dtype)
-        context_lens = torch.randint(int(0.7 * avg_kv), int(1.3 * avg_kv), (raw_batch_size,), device='cuda', dtype=torch.int)
+        context_lens = torch.randint(int(0.7 * avg_kv), int(1.3 * avg_kv), (raw_batch_size,), device='cpu', dtype=torch.int)
 
         if is_varlen:
             max_ctx_len_per_seq = context_lens + (tokens_per_seq - 1)
@@ -411,9 +411,9 @@ def test_paged_mqa_logits():
         num_blocks_per_query = ceil_div(max_ctx_len_per_seq, block_kv)
         max_model_len = num_blocks_per_query.max().item() * block_kv
         num_total_blocks = num_blocks_per_query.sum().item()
-        kv_cache = torch.randn((num_total_blocks, block_kv, 1, head_dim), device='cuda', dtype=torch.bfloat16)
-        block_table = torch.zeros((raw_batch_size, num_blocks_per_query.max().item()), device='cuda', dtype=torch.int)
-        block_idx_pool = torch.randperm(num_total_blocks, device='cuda', dtype=torch.int)
+        kv_cache = torch.randn((num_total_blocks, block_kv, 1, head_dim), device='cpu', dtype=torch.bfloat16)
+        block_table = torch.zeros((raw_batch_size, num_blocks_per_query.max().item()), device='cpu', dtype=torch.int)
+        block_idx_pool = torch.randperm(num_total_blocks, device='cpu', dtype=torch.int)
         offset = 0
         for i, num_blocks in enumerate(num_blocks_per_query.tolist()):
             block_table[i, :num_blocks] = block_idx_pool[offset : offset + num_blocks]
@@ -421,7 +421,7 @@ def test_paged_mqa_logits():
         if is_varlen:
             context_lens = context_lens.repeat_interleave(tokens_per_seq)
             offsets_within_seq = torch.cat([
-                torch.arange(n.item(), device='cuda', dtype=torch.int)
+                torch.arange(n.item(), device='cpu', dtype=torch.int)
                 for n in tokens_per_seq
             ])
             context_lens = context_lens + offsets_within_seq
@@ -453,20 +453,20 @@ def test_paged_mqa_logits():
         simulated_logits = ref_paged_mqa_logits(q_simulated, kv_simulated, kernel_weights.float(), context_lens, block_table, max_model_len, use_2d_context_lens)
 
         # Prepare masks and context lengths with NextN
-        positions = torch.arange(max_model_len, device='cuda').unsqueeze(0).expand(batch_size * next_n, -1)
+        positions = torch.arange(max_model_len, device='cpu').unsqueeze(0).expand(batch_size * next_n, -1)
         if use_2d_context_lens:
             if is_varlen:
                 # Varlen: context_lens is already per-token (shape [total_tokens]);
                 # just reshape to (total_tokens, 1) so each token keeps its own ctx_len.
                 context_lens_nextn = context_lens.view(-1, 1)
             else:
-                context_lens_nextn = ((context_lens.unsqueeze(1) + 1) * torch.rand(batch_size, next_n, device='cuda')).int()
+                context_lens_nextn = ((context_lens.unsqueeze(1) + 1) * torch.rand(batch_size, next_n, device='cpu')).int()
                 # Ensure last token matches actual length
                 context_lens_nextn[:, -1] = context_lens
             ref_neginf_mask = ~(positions < context_lens_nextn.view(-1, 1))
         else:
             context_lens_nextn = context_lens
-            offsets = torch.arange(batch_size * next_n, device='cuda')
+            offsets = torch.arange(batch_size * next_n, device='cpu')
             limits = (context_lens[offsets // next_n] - next_n + offsets % next_n).unsqueeze(1)
             ref_neginf_mask = ~(positions <= limits)
 
@@ -482,13 +482,13 @@ def test_paged_mqa_logits():
             indices=indices,
         )
         print_kernel_io('fp8_fp4_paged_mqa_logits', kernel_kwargs, {})
-        logits = deep_gemm.fp8_fp4_paged_mqa_logits(**kernel_kwargs)
+        logits = _call_kernel_on_cuda(deep_gemm.fp8_fp4_paged_mqa_logits, kernel_kwargs)
         print_kernel_io('fp8_fp4_paged_mqa_logits', {}, dict(logits=logits))
 
         self_mask = ~ref_neginf_mask
         masked_logits = logits.masked_fill(~self_mask, 0)
         for _ in range(20):
-            logits_again = deep_gemm.fp8_fp4_paged_mqa_logits(**kernel_kwargs).masked_fill(~self_mask, 0)
+            logits_again = _call_kernel_on_cuda(deep_gemm.fp8_fp4_paged_mqa_logits, kernel_kwargs).masked_fill(~self_mask, 0)
             assert_bitwise_equal(logits_again, masked_logits, 'paged mqa logits self-consistency')
 
         # Validation
@@ -514,7 +514,8 @@ def test_paged_mqa_logits():
         kv_sum_lens = seq_sum_lens if is_varlen else sum_lens
         total_bytes = q_weight_bytes + kv_sum_lens * kv_bytes_per_token + (sum_lens * next_n * logits_dtype.itemsize)
 
-        t, clean_t = bench_kineto(lambda: deep_gemm.fp8_fp4_paged_mqa_logits(**kernel_kwargs), ('paged_mqa_logits', 'clean_logits'))
+        t, clean_t = bench_kineto(lambda: deep_gemm.fp8_fp4_paged_mqa_logits(**kernel_kwargs), ('paged_mqa_logits', 'clean_logits'),
+                                  tensor_vars=('kernel_kwargs',))
         reduce_relus = sum_lens * next_n * num_heads
         relu_per_sm_cycle = reduce_relus / (t * deep_gemm.get_num_sms() * 1.95 * 1e9)
         next_n_desc = f'MaxTPR={max_tokens_per_batch:2}' if is_varlen else f'NextN ={raw_next_n:2}'
