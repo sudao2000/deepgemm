@@ -91,6 +91,20 @@ def dtype_tag(dtype: torch.dtype) -> str:
     return 'BF16' if dtype == torch.bfloat16 else 'FP32'
 
 
+def _call_kernel_on_cuda(fn, kwargs: dict):
+    """Move all Tensor values in `kwargs` to CUDA, call `fn(**kwargs)`, then move them back to CPU.
+
+    The return value is also moved to CPU if it is a Tensor. This keeps the test data on CPU
+    except during the actual kernel execution.
+    """
+    for k in list(kwargs.keys()):
+        kwargs[k] = to_device(kwargs[k], 'cuda')
+    out = fn(**kwargs)
+    for k in list(kwargs.keys()):
+        kwargs[k] = to_device(kwargs[k], 'cpu')
+    return out.to('cpu') if isinstance(out, torch.Tensor) else out
+
+
 def ref_fp8_mqa_logits(q: torch.Tensor, kv: torch.Tensor, weights: torch.Tensor,
                        cu_seqlen_ks: torch.Tensor, cu_seqlen_ke: torch.Tensor, cost_only: bool = False):
     seq_len_kv = kv.shape[0]
@@ -105,12 +119,13 @@ def ref_fp8_mqa_logits(q: torch.Tensor, kv: torch.Tensor, weights: torch.Tensor,
     q = q.float()
     k = kv.float()
     w = weights.transpose(0, 1).contiguous()       # [num_heads, seq_len]
+    dev = q.device
 
     # Chunk along KV so the temporary score tensor stays bounded
     kv_chunk = max(1, (256 * 1024 * 1024) // max(1, seq_len * q.shape[1] * 4))   # ~cap score chunk bytes
-    positions = torch.arange(0, seq_len_kv, device='cuda')
-    logits = torch.empty((seq_len, seq_len_kv), dtype=torch.float, device='cuda')
-    cost = torch.zeros((), dtype=torch.long, device='cuda')
+    positions = torch.arange(0, seq_len_kv, device=dev)
+    logits = torch.empty((seq_len, seq_len_kv), dtype=torch.float, device=dev)
+    cost = torch.zeros((), dtype=torch.long, device=dev)
     for n0 in range(0, seq_len_kv, kv_chunk):
         n1 = min(n0 + kv_chunk, seq_len_kv)
         score = torch.einsum('mhd,nd->hmn', q, k[n0:n1])           # [H, M, chunk]
@@ -150,16 +165,16 @@ def test_mqa_logits():
     # Helper functions
     def generate_ks_ke_tests(seq_len: int, seq_len_kv: int, disable_cp: bool):
         if disable_cp:
-            ks = torch.zeros(seq_len, dtype=torch.int, device='cuda')
-            ke = torch.arange(seq_len, dtype=torch.int, device='cuda') + (seq_len_kv - seq_len)
+            ks = torch.zeros(seq_len, dtype=torch.int, device='cpu')
+            ke = torch.arange(seq_len, dtype=torch.int, device='cpu') + (seq_len_kv - seq_len)
             return ks, ke
         assert seq_len_kv % seq_len == 0 and seq_len % 2 == 0
         chunk_size = seq_len // 2
         cp_size = seq_len_kv // seq_len
         # Select an arbitrary CP rank
         cp_id = cp_size // 3
-        ks = torch.zeros(seq_len, dtype=torch.int, device='cuda')
-        ke = torch.zeros(seq_len, dtype=torch.int,  device='cuda')
+        ks = torch.zeros(seq_len, dtype=torch.int, device='cpu')
+        ke = torch.zeros(seq_len, dtype=torch.int,  device='cpu')
         for i in range(chunk_size):
             ke[i] = cp_id * chunk_size + i
             ke[i + chunk_size] = (cp_size * 2 - 1 - cp_id) * chunk_size + i
@@ -169,10 +184,10 @@ def test_mqa_logits():
     for fmt, logits_dtype, weights_dtype, compressed_logits, clean_logits, seq_len, seq_len_kv, num_heads, head_dim, disable_cp in sample_mqa_cases('prefill', list(enumerate_mqa_logits())):
         is_mxfp4 = fmt == 'mxfp4'
         is_mxfp8 = fmt == 'mxfp8'
-        # Generate random inputs
-        q = torch.randn(seq_len, num_heads, head_dim, device='cuda', dtype=torch.bfloat16)
-        kv = torch.randn(seq_len_kv, head_dim, device='cuda', dtype=torch.bfloat16)
-        weights = torch.randn(seq_len, num_heads, device='cuda', dtype=torch.float32)
+        # Generate random inputs on CPU; they are moved to CUDA only for the kernel call
+        q = torch.randn(seq_len, num_heads, head_dim, device='cpu', dtype=torch.bfloat16)
+        kv = torch.randn(seq_len_kv, head_dim, device='cpu', dtype=torch.bfloat16)
+        weights = torch.randn(seq_len, num_heads, device='cpu', dtype=torch.float32)
         kernel_weights = weights.to(weights_dtype)
         ks, ke = generate_ks_ke_tests(seq_len, seq_len_kv, disable_cp)
 
@@ -213,18 +228,18 @@ def test_mqa_logits():
             max_seqlen_k = (ke - ks).max().item()
             kernel_kwargs['max_seqlen_k'] = max_seqlen_k
 
-        # Run kernel
+        # Run kernel on CUDA, then bring the result back to CPU
         print_kernel_io('fp8_fp4_mqa_logits', kernel_kwargs, {})
-        logits = deep_gemm.fp8_fp4_mqa_logits(**kernel_kwargs)
+        logits = _call_kernel_on_cuda(deep_gemm.fp8_fp4_mqa_logits, kernel_kwargs)
         print_kernel_io('fp8_fp4_mqa_logits', {}, dict(logits=logits))
 
         if compressed_logits:
-            self_mask = torch.arange(logits.size(1), device='cuda')[None, :] < (ke - ks)[:, None]
+            self_mask = torch.arange(logits.size(1), device=logits.device)[None, :] < (ke - ks)[:, None]
             masked_logits = logits.masked_fill(~self_mask, 0)
         else:
             masked_logits = logits
         for _ in range(20):
-            logits_again = deep_gemm.fp8_fp4_mqa_logits(**kernel_kwargs)
+            logits_again = _call_kernel_on_cuda(deep_gemm.fp8_fp4_mqa_logits, kernel_kwargs)
             if compressed_logits:
                 logits_again = logits_again.masked_fill(~self_mask, 0)
             assert_bitwise_equal(logits_again, masked_logits, 'mqa logits self-consistency')
@@ -232,7 +247,7 @@ def test_mqa_logits():
         # Post process for compressed logits
         if compressed_logits:
             assert logits.size() == (seq_len, max_seqlen_k)
-            tmp = torch.full((seq_len, seq_len_kv), float('-inf'), device='cuda')
+            tmp = torch.full((seq_len, seq_len_kv), float('-inf'), device=logits.device)
             for i in range(seq_len):
                 tmp[i, ks[i] : ke[i]] = logits[i, : ke[i] - ks[i]]
             logits = tmp
@@ -250,9 +265,10 @@ def test_mqa_logits():
         assert diff < (0.02 if (is_mxfp4 or is_mxfp8) else 1e-3), f"Diff: {diff}"
         assert simulated_diff < ref_diff_tol(weights_dtype == torch.bfloat16 or logits_dtype == torch.bfloat16), f"Simulated Diff: {simulated_diff}"
 
-        # Profiling
+        # Profiling: bench_kineto moves the captured kernel_kwargs to CUDA only while running the lambda
         tflops = 2 * ref_cost * num_heads * head_dim / 1e12
-        t, clean_t = bench_kineto(lambda: deep_gemm.fp8_fp4_mqa_logits(**kernel_kwargs), ('mqa_logits', 'clean_logits'))
+        t, clean_t = bench_kineto(lambda: deep_gemm.fp8_fp4_mqa_logits(**kernel_kwargs), ('mqa_logits', 'clean_logits'),
+                                  tensor_vars=('kernel_kwargs',))
         clean_bytes = (seq_len * seq_len_kv - ref_cost) * logits_dtype.itemsize + count_bytes(ks, ke)
 
         reduce_relus = ref_cost * num_heads
