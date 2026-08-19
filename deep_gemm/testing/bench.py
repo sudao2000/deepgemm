@@ -142,7 +142,7 @@ class suppress_stdout_stderr:
         self.errnull_file.close()
 
 
-def bench_kineto(fn, kernel_names, num_tests: int = 30,
+def bench_kineto(fn, kernel_names, num_tests: int = 1,
                  suppress_kineto_output: bool = False,
                  trace_path: str = None, flush_l2: bool = True,
                  with_multiple_kernels: bool = False,
