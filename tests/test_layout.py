@@ -16,6 +16,7 @@ from generators import (
     enumerate_k_grouped_psum_sf_layout,
     print_kernel_io,
 )
+from deep_gemm.testing.bench import _CudaClosureContext
 
 
 def get_mn_major_tma_aligned_packed_ue8m0_tensor_torch_impl(x: torch.Tensor) -> torch.Tensor:
@@ -46,7 +47,7 @@ def get_mn_major_tma_aligned_packed_ue8m0_tensor_torch_impl(x: torch.Tensor) -> 
 def test_sf_layout_kernels() -> None:
     print('Testing SF layout kernels:')
     for mn, k, with_transpose, use_ue8m0, num_groups, gran_k in enumerate_sf_layout():
-        x = torch.randn((num_groups * mn, k), dtype=torch.bfloat16, device='cuda')
+        x = torch.randn((num_groups * mn, k), dtype=torch.bfloat16, device='cpu')
         x, fp32_sf = per_token_cast_to_fp8(x, use_ue8m0=use_ue8m0, gran_k=gran_k)
         fp32_sf = fp32_sf if num_groups == 1 else fp32_sf.view(num_groups, mn, -1)
         fp32_sf = fp32_sf if with_transpose else fp32_sf.transpose(-1, -2).contiguous().transpose(-1, -2)
@@ -55,7 +56,8 @@ def test_sf_layout_kernels() -> None:
         if use_ue8m0:
             impl, name = get_mn_major_tma_aligned_packed_ue8m0_tensor, 'pack_fp32_into_ue8m0'
             print_kernel_io('get_mn_major_tma_aligned_packed_ue8m0_tensor', dict(fp32_sf=fp32_sf), {})
-            packed_sf = get_mn_major_tma_aligned_packed_ue8m0_tensor(fp32_sf)
+            with _CudaClosureContext(lambda: impl(fp32_sf), tensor_vars=('fp32_sf',)):
+                packed_sf = impl(fp32_sf)
             print_kernel_io('get_mn_major_tma_aligned_packed_ue8m0_tensor', {}, dict(packed_sf=packed_sf))
             ref_packed_sf = get_mn_major_tma_aligned_packed_ue8m0_tensor_torch_impl(fp32_sf)
             assert torch.equal(packed_sf, ref_packed_sf), f'{mn=}, {k=}, {with_transpose=}, {num_groups=}'
@@ -64,7 +66,8 @@ def test_sf_layout_kernels() -> None:
         else:
             impl, name = get_mn_major_tma_aligned_tensor, 'transpose'
             print_kernel_io('get_mn_major_tma_aligned_tensor', dict(fp32_sf=fp32_sf), {})
-            transposed_sf = get_mn_major_tma_aligned_tensor(fp32_sf)
+            with _CudaClosureContext(lambda: impl(fp32_sf), tensor_vars=('fp32_sf',)):
+                transposed_sf = impl(fp32_sf)
             print_kernel_io('get_mn_major_tma_aligned_tensor', {}, dict(transposed_sf=transposed_sf))
             tma_aligned_mn, sf_k = get_tma_aligned_size(mn, fp32_sf.element_size()), ceil_div(k, gran_k)
             if num_groups > 1:
@@ -76,7 +79,7 @@ def test_sf_layout_kernels() -> None:
 
         # Performance
         try:
-            t = bench_kineto(lambda: impl(fp32_sf), name)
+            t = bench_kineto(lambda: impl(fp32_sf), name, tensor_vars=('fp32_sf',))
         except AssertionError as e:
             # Some cases may fallback to PyTorch impl
             t = 0

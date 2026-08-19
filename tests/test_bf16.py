@@ -17,8 +17,10 @@ from generators import (
     generate_normal, generate_m_grouped_contiguous, generate_m_grouped_masked, generate_k_grouped_contiguous,
     generate_k_grouped_contiguous_psum,
     get_mk_alignment_for_contiguous_layout,
-    print_kernel_io
+    print_kernel_io,
+    to_device,
 )
+from deep_gemm.testing.bench import _CudaClosureContext
 
 
 def test_gemm() -> None:
@@ -38,15 +40,19 @@ def test_gemm() -> None:
                 b = b if major_b.is_k_major() else b.T
                 assert a.is_contiguous() and b.is_contiguous()
             print_kernel_io(func_name, dict(a=a, b=b, c=c), dict(d=d))
-            getattr(deep_gemm, func_name)(a, b, d, c=c)
+            with _CudaClosureContext(lambda: getattr(deep_gemm, func_name)(a, b, d, c=c),
+                                     tensor_vars=('a', 'b', 'd', 'c')):
+                getattr(deep_gemm, func_name)(a, b, d, c=c)
             print_kernel_io(func_name, {}, dict(d=d))
             diff = calc_diff(d, ref_d)
             assert diff < 1e-5, (f'{m=}, {n=}, {k=}, {major_opt=}, {accumulate=}, {out_dtype=}, '
                                    f'{diff:.5f}, alias={test_alias}')
         a, b, c, d, ref_d = generate_normal(m, n, k, major_a, major_b, accumulate, out_dtype, kernel_type, use_bf16=True)
 
-        t = bench_kineto(lambda: deep_gemm.bf16_gemm_nt(a, b, d, c=c), 'bf16_gemm', suppress_kineto_output=True)
-        cublas_t, split_k_t = bench_kineto(lambda: deep_gemm.cublaslt_gemm_nt(a, b, d, c=c), ('nvjet', 'reduce'), suppress_kineto_output=True)
+        t = bench_kineto(lambda: deep_gemm.bf16_gemm_nt(a, b, d, c=c), 'bf16_gemm',
+                         tensor_vars=('a', 'b', 'd', 'c'), suppress_kineto_output=True)
+        cublas_t, split_k_t = bench_kineto(lambda: deep_gemm.cublaslt_gemm_nt(a, b, d, c=c), ('nvjet', 'reduce'),
+                                           tensor_vars=('a', 'b', 'd', 'c'), suppress_kineto_output=True)
         print(f' > Perf (m={m:6}, n={n:6}, k={k:6}, layout={major_opt}, {out_opt}, {acc_opt}): '
               f'{t * 1e6:7.1f} us | '
               f'{2 * m * n * k / t / 1e12:4.0f} TFLOPS | '
@@ -79,8 +85,12 @@ def test_m_grouped_gemm_contiguous() -> None:
             print_kernel_io(func_name, dict(a=a, b=b, grouped_layout=grouped_layout,
                                               use_psum_layout=use_psum_layout,
                                               ensure_zero_padding=ensure_zero_padding), dict(d=d))
-            getattr(deep_gemm, func_name)(a, b, d, grouped_layout, use_psum_layout=use_psum_layout,
-                                          ensure_zero_padding=ensure_zero_padding)
+            with _CudaClosureContext(lambda: getattr(deep_gemm, func_name)(a, b, d, grouped_layout,
+                                                                           use_psum_layout=use_psum_layout,
+                                                                           ensure_zero_padding=ensure_zero_padding),
+                                     tensor_vars=('a', 'b', 'd', 'grouped_layout')):
+                getattr(deep_gemm, func_name)(a, b, d, grouped_layout, use_psum_layout=use_psum_layout,
+                                              ensure_zero_padding=ensure_zero_padding)
             print_kernel_io(func_name, {}, dict(d=d))
             if use_psum_layout:
                 for j in range(num_groups):
@@ -102,7 +112,8 @@ def test_m_grouped_gemm_contiguous() -> None:
             deep_gemm.m_grouped_bf16_gemm_nt_contiguous(a, b, d, grouped_layout, use_psum_layout=use_psum_layout,
                                                         ensure_zero_padding=ensure_zero_padding)
 
-        t = bench_kineto(test_func, 'bf16_gemm', suppress_kineto_output=True)
+        t = bench_kineto(test_func, 'bf16_gemm', tensor_vars=('a', 'b', 'd', 'grouped_layout'),
+                         suppress_kineto_output=True)
         print(f' > Perf ({num_groups=}, m={m:5}, n={n:5}, k={k:5}, layout={major_opt}, '
               f'psum={use_psum_layout}, zero_pad={ensure_zero_padding}): '
               f'{t * 1e6:4.0f} us | '
@@ -148,7 +159,9 @@ def test_m_grouped_gemm_masked() -> None:
                     deep_gemm.m_grouped_bf16_gemm_nt_masked(a, b, d, masked_m, expected_m_per_group)
                     print_kernel_io('m_grouped_bf16_gemm_nt_masked', {}, dict(d=d))
 
-            test_func()
+            with _CudaClosureContext(test_func, tensor_vars=('a', 'b', 'd', 'masked_m',
+                                                                 'a_psum', 'd_psum', 'psum_m')):
+                test_func()
             for j in range(num_groups):
                 if masked_m[j].item() == 0:
                     continue
@@ -162,7 +175,10 @@ def test_m_grouped_gemm_masked() -> None:
 
             # Test performance with fixed shapes
             valid_m = masked_m.sum().item()
-            t = bench_kineto(test_func, 'bf16_gemm', suppress_kineto_output=True)
+            t = bench_kineto(test_func, 'bf16_gemm',
+                             tensor_vars=('a', 'b', 'd', 'masked_m',
+                                          'a_psum', 'd_psum', 'psum_m'),
+                             suppress_kineto_output=True)
 
             sum_t += t
             max_t = max(max_t, t)
@@ -191,7 +207,11 @@ def test_k_grouped_gemm_contiguous() -> None:
             print_kernel_io('k_grouped_bf16_gemm_tn_contiguous',
                             dict(a=a, b=b, ks_cpu=test_aligned_ks_cpu, grouped_layout=grouped_layout, c=c,
                                  use_psum_layout=use_psum_layout), dict(d=d))
-            deep_gemm.k_grouped_bf16_gemm_tn_contiguous(a, b, d, test_aligned_ks_cpu, grouped_layout, c, use_psum_layout=use_psum_layout)
+            with _CudaClosureContext(lambda: deep_gemm.k_grouped_bf16_gemm_tn_contiguous(
+                    a, b, d, test_aligned_ks_cpu, grouped_layout, c, use_psum_layout=use_psum_layout),
+                    tensor_vars=('a', 'b', 'c', 'd', 'grouped_layout')):
+                deep_gemm.k_grouped_bf16_gemm_tn_contiguous(a, b, d, test_aligned_ks_cpu, grouped_layout, c,
+                                                            use_psum_layout=use_psum_layout)
             print_kernel_io('k_grouped_bf16_gemm_tn_contiguous', {}, dict(d=d))
 
             diff = calc_diff(d, ref_d)
@@ -203,8 +223,11 @@ def test_k_grouped_gemm_contiguous() -> None:
                 print_kernel_io('k_grouped_bf16_gemm_tn_contiguous',
                                 dict(a=a, b=b, ks_cpu=None, grouped_layout=grouped_layout, c=c,
                                      use_psum_layout=True), dict(d=d))
-                deep_gemm.k_grouped_bf16_gemm_tn_contiguous(a, b, d, None, grouped_layout, c,
-                                                            use_psum_layout=True)
+                with _CudaClosureContext(lambda: deep_gemm.k_grouped_bf16_gemm_tn_contiguous(
+                        a, b, d, None, grouped_layout, c, use_psum_layout=True),
+                        tensor_vars=('a', 'b', 'c', 'd', 'grouped_layout')):
+                    deep_gemm.k_grouped_bf16_gemm_tn_contiguous(a, b, d, None, grouped_layout, c,
+                                                                use_psum_layout=True)
                 print_kernel_io('k_grouped_bf16_gemm_tn_contiguous', {}, dict(d=d))
                 diff = calc_diff(d, ref_d)
                 assert diff < 1e-5, f'None ks_cpu path: {m=}, {n=}, {total_k=}, {test_real_ks_cpu=}, {diff:.7f}'
@@ -213,8 +236,11 @@ def test_k_grouped_gemm_contiguous() -> None:
                 print_kernel_io('k_grouped_bf16_gemm_tn_contiguous',
                                 dict(a=a, b=b, ks_cpu=[], grouped_layout=grouped_layout, c=c,
                                      use_psum_layout=True), dict(d=d))
-                deep_gemm.k_grouped_bf16_gemm_tn_contiguous(a, b, d, [], grouped_layout, c,
-                                                            use_psum_layout=True)
+                with _CudaClosureContext(lambda: deep_gemm.k_grouped_bf16_gemm_tn_contiguous(
+                        a, b, d, [], grouped_layout, c, use_psum_layout=True),
+                        tensor_vars=('a', 'b', 'c', 'd', 'grouped_layout')):
+                    deep_gemm.k_grouped_bf16_gemm_tn_contiguous(a, b, d, [], grouped_layout, c,
+                                                                use_psum_layout=True)
                 print_kernel_io('k_grouped_bf16_gemm_tn_contiguous', {}, dict(d=d))
                 diff = calc_diff(d, ref_d)
                 assert diff < 1e-5, f'empty ks_cpu path: {m=}, {n=}, {total_k=}, {test_real_ks_cpu=}, {diff:.7f}'
@@ -229,7 +255,9 @@ def test_k_grouped_gemm_contiguous() -> None:
         def test_func():
             deep_gemm.k_grouped_bf16_gemm_tn_contiguous(a, b, d, aligned_ks_cpu, grouped_layout, c, use_psum_layout=use_psum_layout)
 
-        t = bench_kineto(test_func, 'bf16_gemm', suppress_kineto_output=True)
+        t = bench_kineto(test_func, 'bf16_gemm',
+                         tensor_vars=('a', 'b', 'c', 'd', 'grouped_layout'),
+                         suppress_kineto_output=True)
         print(f' > Perf ({num_groups=:2}, m={m:5}, n={n:5}, k={total_k:5}, align={alignment:3}, psum={int(use_psum_layout)}): '
               f'{t * 1e6:4.0f} us | '
               f'{2 * m * n * total_k / t / 1e12:4.0f} TFLOPS | '
@@ -248,14 +276,17 @@ def test_cublaslt_gemm() -> None:
 
         a, b, c, d, ref_d = generate_normal(m, n, k, major_a, major_b, accumulate, out_dtype, kernel_type, use_bf16=True)
         print_kernel_io('cublaslt_gemm_nt', dict(a=a, b=b, c=c), dict(d=d))
-        deep_gemm.cublaslt_gemm_nt(a, b, d, c=c)
+        with _CudaClosureContext(lambda: deep_gemm.cublaslt_gemm_nt(a, b, d, c=c),
+                                 tensor_vars=('a', 'b', 'd', 'c')):
+            deep_gemm.cublaslt_gemm_nt(a, b, d, c=c)
         print_kernel_io('cublaslt_gemm_nt', {}, dict(d=d))
         diff = calc_diff(d, ref_d)
         # BF16 accumulation has lower precision than cuBLASLt's FP32 accumulation
         threshold = 1e-5 if (accumulate and out_dtype == torch.bfloat16) else 6e-7
         assert diff < threshold, f'{diff=}, ({m=}, {n=}, {k=}, {major_opt=}, {accumulate=}, {out_dtype=})'
 
-        t_nvjet, t_gemv, t_gemm = bench_kineto(lambda: deep_gemm.cublaslt_gemm_nt(a, b, d, c=c), ('nvjet', 'gemv', 'gemm'), suppress_kineto_output=True)
+        t_nvjet, t_gemv, t_gemm = bench_kineto(lambda: deep_gemm.cublaslt_gemm_nt(a, b, d, c=c), ('nvjet', 'gemv', 'gemm'),
+                                                 tensor_vars=('a', 'b', 'd', 'c'), suppress_kineto_output=True)
         t = t_nvjet + t_gemv + t_gemm
         print(f' > Perf (m={m:6}, n={n:6}, k={k:6}, layout={major_opt}, {out_opt}, {acc_opt}): '
               f'{t * 1e6:5.0f} us | '

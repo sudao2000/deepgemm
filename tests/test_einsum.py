@@ -12,7 +12,8 @@ from deep_gemm.utils.math import (
     per_block_cast_to_fp8, per_channel_cast_to_fp8, per_token_cast_to_fp8
 )
 
-from generators import print_kernel_io
+from generators import print_kernel_io, to_device
+from deep_gemm.testing.bench import _CudaClosureContext
 
 
 def enumerate_bmk_bnk_mn():
@@ -37,19 +38,22 @@ def enumerate_fp8_hrd_b():
 def test_bmk_bnk_mn() -> None:
     print('Testing "bmk, bnk -> mn":')
     for s, m, n, k, dtype in enumerate_bmk_bnk_mn():
-        a = torch.randn((s, m, k), dtype=torch.bfloat16, device='cuda')
-        b = torch.randn((s, n, k), dtype=torch.bfloat16, device='cuda')
-        d = torch.randn((m, n), dtype=dtype, device='cuda')
+        a = torch.randn((s, m, k), dtype=torch.bfloat16, device='cpu')
+        b = torch.randn((s, n, k), dtype=torch.bfloat16, device='cpu')
+        d = torch.randn((m, n), dtype=dtype, device='cpu')
         c = d if dtype == torch.float else None
 
         # Test correctness
         ref_d = (c if dtype == torch.float else 0) + torch.bmm(a.float(), b.float().mT).sum(0)
         print_kernel_io('einsum', dict(equation='bmk,bnk->mn', a=a, b=b, c=c), dict(d=d))
-        deep_gemm.einsum('bmk,bnk->mn', a, b, d, c=c)
+        with _CudaClosureContext(lambda: deep_gemm.einsum('bmk,bnk->mn', a, b, d, c=c),
+                                 tensor_vars=('a', 'b', 'd', 'c')):
+            deep_gemm.einsum('bmk,bnk->mn', a, b, d, c=c)
         print_kernel_io('einsum', {}, dict(d=d))
         assert calc_diff(d, ref_d) < 1e-5
 
-        t = bench_kineto(lambda: deep_gemm.einsum('bmk,bnk->mn', a, b, d, c=c), 'bmn_bnk_mn_gemm_impl', suppress_kineto_output=True)
+        t = bench_kineto(lambda: deep_gemm.einsum('bmk,bnk->mn', a, b, d, c=c), 'bmn_bnk_mn_gemm_impl',
+                         tensor_vars=('a', 'b', 'd', 'c'), suppress_kineto_output=True)
         print(f' > Perf (b={s:4.0f}, {m=}, {n=}, {k=}, {"FP32" if dtype == torch.float else "BF16"}): ',
             f'{t * 1e6:4.0f} us | '
             f'{2 * s * m * n * k / t / 1e12:4.0f} TFLOPS | '
@@ -60,18 +64,22 @@ def test_bmk_bnk_mn() -> None:
 def test_bhr_hdr_bhd():
     print('Testing "bhr, hdr -> bhd":')
     for h, r, d, b in enumerate_hrd_b():
-        x = torch.randn((b, h, r), device='cuda', dtype=torch.bfloat16)
-        fy = torch.randn((h, d, r + 128), device='cuda', dtype=torch.bfloat16)
+        x = torch.randn((b, h, r), device='cpu', dtype=torch.bfloat16)
+        fy = torch.randn((h, d, r + 128), device='cpu', dtype=torch.bfloat16)
         y = fy[:, :, :r]
         ref_z = torch.einsum('bhr,hdr->bhd', x, y)
-        z = torch.empty((b, h, d), device='cuda', dtype=torch.bfloat16)
+        z = torch.empty((b, h, d), device='cpu', dtype=torch.bfloat16)
         print_kernel_io('einsum', dict(equation='bhr,hdr->bhd', a=x, b=y), dict(z=z))
-        deep_gemm.einsum('bhr,hdr->bhd', x, y, z)
+        with _CudaClosureContext(lambda: deep_gemm.einsum('bhr,hdr->bhd', x, y, z),
+                                 tensor_vars=('x', 'y', 'z')):
+            deep_gemm.einsum('bhr,hdr->bhd', x, y, z)
         print_kernel_io('einsum', {}, dict(z=z))
         assert calc_diff(z, ref_z) < 1e-10
 
-        t = bench_kineto(lambda: deep_gemm.einsum('bhr,hdr->bhd', x, y, z), 'gemm', suppress_kineto_output=True)
-        t_cublaslt = bench_kineto(lambda: deep_gemm.einsum('bhr,hdr->bhd', x, y, z, use_cublaslt=True), 'nvjet', suppress_kineto_output=True)
+        t = bench_kineto(lambda: deep_gemm.einsum('bhr,hdr->bhd', x, y, z), 'gemm',
+                         tensor_vars=('x', 'y', 'z'), suppress_kineto_output=True)
+        t_cublaslt = bench_kineto(lambda: deep_gemm.einsum('bhr,hdr->bhd', x, y, z, use_cublaslt=True), 'nvjet',
+                                  tensor_vars=('x', 'y', 'z'), suppress_kineto_output=True)
         print(f' > Perf ({b=:4.0f}, {h=}, {r=}, {d=}): ',
               f'{t * 1e6:4.0f} us | '
               f'{2 * b * h * r * d / t / 1e12:4.0f} TFLOPS | '
@@ -83,18 +91,22 @@ def test_bhr_hdr_bhd():
 def test_bhd_hdr_bhr():
     print('Testing "bhd, hdr -> bhr":')
     for h, r, d, b in enumerate_hrd_b():
-        x = torch.randn((b, h, d), device='cuda', dtype=torch.bfloat16)
-        fy = torch.randn((h, d, r + 128), device='cuda', dtype=torch.bfloat16)
+        x = torch.randn((b, h, d), device='cpu', dtype=torch.bfloat16)
+        fy = torch.randn((h, d, r + 128), device='cpu', dtype=torch.bfloat16)
         y = fy[:, :, :r]
         ref_z = torch.einsum('bhd,hdr->bhr', x, y)
-        z = torch.empty((b, h, r), device='cuda', dtype=torch.bfloat16)
+        z = torch.empty((b, h, r), device='cpu', dtype=torch.bfloat16)
         print_kernel_io('einsum', dict(equation='bhd,hdr->bhr', a=x, b=y), dict(z=z))
-        deep_gemm.einsum('bhd,hdr->bhr', x, y, z)
+        with _CudaClosureContext(lambda: deep_gemm.einsum('bhd,hdr->bhr', x, y, z),
+                                 tensor_vars=('x', 'y', 'z')):
+            deep_gemm.einsum('bhd,hdr->bhr', x, y, z)
         print_kernel_io('einsum', {}, dict(z=z))
         assert calc_diff(z, ref_z) < 1e-10
 
-        t = bench_kineto(lambda: deep_gemm.einsum('bhd,hdr->bhr', x, y, z), 'gemm', suppress_kineto_output=True)
-        t_cublaslt = bench_kineto(lambda: deep_gemm.einsum('bhd,hdr->bhr', x, y, z, use_cublaslt=True), 'nvjet', suppress_kineto_output=True)
+        t = bench_kineto(lambda: deep_gemm.einsum('bhd,hdr->bhr', x, y, z), 'gemm',
+                         tensor_vars=('x', 'y', 'z'), suppress_kineto_output=True)
+        t_cublaslt = bench_kineto(lambda: deep_gemm.einsum('bhd,hdr->bhr', x, y, z, use_cublaslt=True), 'nvjet',
+                                  tensor_vars=('x', 'y', 'z'), suppress_kineto_output=True)
         print(f' > Perf ({b=:4.0f}, {h=}, {r=}, {d=}): ',
               f'{t * 1e6:4.0f} us | '
               f'{2 * b * h * r * d / t / 1e12:4.0f} TFLOPS | '
@@ -106,25 +118,29 @@ def test_bhd_hdr_bhr():
 def test_fp8_bhr_hdr_bhd(use_ue8m0: bool = True):
     print('Testing FP8 "bhr, hdr -> bhd":')
     for h, r, d, b in enumerate_fp8_hrd_b():
-        x = torch.randn((b, h, r), device='cuda', dtype=torch.bfloat16)
-        y = torch.randn((h, d, r), device='cuda', dtype=torch.bfloat16)
+        x = torch.randn((b, h, r), device='cpu', dtype=torch.bfloat16)
+        y = torch.randn((h, d, r), device='cpu', dtype=torch.bfloat16)
         ref_z = torch.einsum('bhr,hdr->bhd', x, y)
 
         x_fp8 = per_token_cast_to_fp8(x.view(-1, r), use_ue8m0=use_ue8m0)
         x_fp8 = x_fp8[0].view(b, h, r), x_fp8[1].view(b, h, ceil_div(r, 128))
         y_fp8 = (torch.empty_like(y, dtype=torch.float8_e4m3fn),
-                 torch.empty((h, ceil_div(d, 128), ceil_div(r, 128)), device='cuda', dtype=torch.float))
+                 torch.empty((h, ceil_div(d, 128), ceil_div(r, 128)), device='cpu', dtype=torch.float))
         for i in range(h):
             y_fp8[0][i], y_fp8[1][i] = per_block_cast_to_fp8(y[i], use_ue8m0=use_ue8m0)
-        z = torch.empty((b, h, d), device='cuda', dtype=torch.bfloat16)
+        z = torch.empty((b, h, d), device='cpu', dtype=torch.bfloat16)
 
         print_kernel_io('fp8_einsum', dict(equation='bhr,hdr->bhd', a=x_fp8, b=y_fp8), dict(z=z))
-        deep_gemm.fp8_einsum('bhr,hdr->bhd', x_fp8, y_fp8, z)
+        with _CudaClosureContext(lambda: deep_gemm.fp8_einsum('bhr,hdr->bhd', x_fp8, y_fp8, z),
+                                 tensor_vars=('x_fp8', 'y_fp8', 'z')):
+            deep_gemm.fp8_einsum('bhr,hdr->bhd', x_fp8, y_fp8, z)
         print_kernel_io('fp8_einsum', {}, dict(z=z))
         assert calc_diff(z, ref_z) < 1e-3
 
-        t = bench_kineto(lambda: deep_gemm.fp8_einsum('bhr,hdr->bhd', x_fp8, y_fp8, z), 'gemm_', suppress_kineto_output=True)
-        t_cublaslt = bench_kineto(lambda: deep_gemm.einsum('bhr,hdr->bhd', x, y, z, use_cublaslt=True), 'nvjet', suppress_kineto_output=True)
+        t = bench_kineto(lambda: deep_gemm.fp8_einsum('bhr,hdr->bhd', x_fp8, y_fp8, z), 'gemm_',
+                         tensor_vars=('x_fp8', 'y_fp8', 'z'), suppress_kineto_output=True)
+        t_cublaslt = bench_kineto(lambda: deep_gemm.einsum('bhr,hdr->bhd', x, y, z, use_cublaslt=True), 'nvjet',
+                                  tensor_vars=('x', 'y', 'z'), suppress_kineto_output=True)
         print(f' > Perf ({b=:4.0f}, {h=}, {r=}, {d=}): ',
               f'{t * 1e6:4.0f} us | '
               f'{2 * b * h * r * d / t / 1e12:4.0f} TFLOPS | '
@@ -138,25 +154,29 @@ def test_fp8_bhd_hdr_bhr(use_ue8m0: bool = True):
     print('Testing FP8 "bhd, hdr -> bhr":')
     for h, r, d in [(8, 4096, 1024)]:
         for b in (4, 32, 128, 4096, 8192):
-            x = torch.randn((b, h, d), device='cuda', dtype=torch.bfloat16)
-            y = torch.randn((h, d, r), device='cuda', dtype=torch.bfloat16)
+            x = torch.randn((b, h, d), device='cpu', dtype=torch.bfloat16)
+            y = torch.randn((h, d, r), device='cpu', dtype=torch.bfloat16)
             ref_z = torch.einsum('bhd,hdr->bhr', x, y)
 
             x_fp8 = per_token_cast_to_fp8(x.view(-1, d), use_ue8m0=use_ue8m0)
             x_fp8 = x_fp8[0].view(b, h, d), x_fp8[1].view(b, h, ceil_div(d, 128))
             y_fp8 = (torch.empty_like(y, dtype=torch.float8_e4m3fn),
-                     torch.empty((h, ceil_div(d, 128), ceil_div(r, 128)), device='cuda', dtype=torch.float))
+                     torch.empty((h, ceil_div(d, 128), ceil_div(r, 128)), device='cpu', dtype=torch.float))
             for i in range(h):
                 y_fp8[0][i], y_fp8[1][i] = per_block_cast_to_fp8(y[i], use_ue8m0=use_ue8m0)
-            z = torch.empty((b, h, r), device='cuda', dtype=torch.bfloat16)
+            z = torch.empty((b, h, r), device='cpu', dtype=torch.bfloat16)
 
             print_kernel_io('fp8_einsum', dict(equation='bhd,hdr->bhr', a=x_fp8, b=y_fp8), dict(z=z))
-            deep_gemm.fp8_einsum('bhd,hdr->bhr', x_fp8, y_fp8, z)
+            with _CudaClosureContext(lambda: deep_gemm.fp8_einsum('bhd,hdr->bhr', x_fp8, y_fp8, z),
+                                     tensor_vars=('x_fp8', 'y_fp8', 'z')):
+                deep_gemm.fp8_einsum('bhd,hdr->bhr', x_fp8, y_fp8, z)
             print_kernel_io('fp8_einsum', {}, dict(z=z))
             assert calc_diff(z, ref_z) < 1e-3
 
-            t = bench_kineto(lambda: deep_gemm.fp8_einsum('bhd,hdr->bhr', x_fp8, y_fp8, z), 'gemm_', suppress_kineto_output=True)
-            t_cublaslt = bench_kineto(lambda: deep_gemm.einsum('bhd,hdr->bhr', x, y, z, use_cublaslt=True), 'nvjet', suppress_kineto_output=True)
+            t = bench_kineto(lambda: deep_gemm.fp8_einsum('bhd,hdr->bhr', x_fp8, y_fp8, z), 'gemm_',
+                             tensor_vars=('x_fp8', 'y_fp8', 'z'), suppress_kineto_output=True)
+            t_cublaslt = bench_kineto(lambda: deep_gemm.einsum('bhd,hdr->bhr', x, y, z, use_cublaslt=True), 'nvjet',
+                                      tensor_vars=('x', 'y', 'z'), suppress_kineto_output=True)
             print(f' > Perf ({b=:4.0f}, {h=}, {r=}, {d=}): ',
                   f'{t * 1e6:4.0f} us | '
                   f'{2 * b * h * r * d / t / 1e12:4.0f} TFLOPS | '
@@ -170,9 +190,9 @@ def test_fp8_bhd_bhr_hdr(use_ue8m0: bool = True):
     print('Testing FP8 "bhd, bhr -> hdr":')
     for h, r, d in [(8, 4096, 1024)]:
         for b in (4096, 8192):
-            x = torch.randn((b, h, d), device='cuda', dtype=torch.bfloat16)
-            y = torch.randn((b, h, r), device='cuda', dtype=torch.bfloat16)
-            z_0 = torch.randn((h, d, r), device='cuda', dtype=torch.float32) * 10
+            x = torch.randn((b, h, d), device='cpu', dtype=torch.bfloat16)
+            y = torch.randn((b, h, r), device='cpu', dtype=torch.bfloat16)
+            z_0 = torch.randn((h, d, r), device='cpu', dtype=torch.float32) * 10
             ref_z = z_0 + torch.einsum('bhd,bhr->hdr', x, y)
 
             x_fp8 = per_channel_cast_to_fp8(x.view(b, -1), use_ue8m0=use_ue8m0)
@@ -181,11 +201,14 @@ def test_fp8_bhd_bhr_hdr(use_ue8m0: bool = True):
             y_fp8 = (y_fp8[0].view(b, h, r), y_fp8[1].view(ceil_div(b, 128), h, r))
             z = z_0.clone()
             print_kernel_io('fp8_einsum', dict(equation='bhd,bhr->hdr', a=x_fp8, b=y_fp8, c=z, recipe=(1, 1, 128)), dict(z=z))
-            deep_gemm.fp8_einsum('bhd,bhr->hdr', x_fp8, y_fp8, z, z, recipe=(1, 1, 128))
+            with _CudaClosureContext(lambda: deep_gemm.fp8_einsum('bhd,bhr->hdr', x_fp8, y_fp8, z, z, recipe=(1, 1, 128)),
+                                     tensor_vars=('x_fp8', 'y_fp8', 'z')):
+                deep_gemm.fp8_einsum('bhd,bhr->hdr', x_fp8, y_fp8, z, z, recipe=(1, 1, 128))
             print_kernel_io('fp8_einsum', {}, dict(z=z))
             assert calc_diff(z, ref_z) < 1e-3
 
-            t = bench_kineto(lambda: deep_gemm.fp8_einsum('bhd,bhr->hdr', x_fp8, y_fp8, z, z, recipe=(1, 1, 128)), 'gemm_', suppress_kineto_output=True)
+            t = bench_kineto(lambda: deep_gemm.fp8_einsum('bhd,bhr->hdr', x_fp8, y_fp8, z, z, recipe=(1, 1, 128)), 'gemm_',
+                             tensor_vars=('x_fp8', 'y_fp8', 'z'), suppress_kineto_output=True)
             print(f' > Perf ({b=:4.0f}, {h=}, {r=}, {d=}): ',
                   f'{t * 1e6:4.0f} us | '
                   f'{2 * b * h * r * d / t / 1e12:4.0f} TFLOPS | '
