@@ -5,6 +5,25 @@ import torch
 from typing import Callable, Iterable, Optional, Union
 
 
+def _fmt_param(v):
+    if isinstance(v, torch.Tensor):
+        return f'Tensor(shape={tuple(v.shape)}, dtype={v.dtype})'
+    if isinstance(v, (tuple, list)):
+        return '(' + ', '.join(_fmt_param(x) for x in v) + ')'
+    return repr(v)
+
+
+def print_kernel_io(kernel_name: str, inputs: dict, outputs: dict):
+    print(f' {kernel_name} inputs:')
+    if inputs:
+        for name, value in inputs.items():
+            print(f'   {name} = {_fmt_param(value)}')
+    if outputs:
+        print(f' {kernel_name} outputs:')
+        for name, value in outputs.items():
+            print(f'   {name} = {_fmt_param(value)}')
+
+
 def _move_tensors(obj, device: Union[str, torch.device], record: dict):
     """Recursively move all Tensors in `obj` to `device`, recording original devices."""
     if isinstance(obj, torch.Tensor):
@@ -160,8 +179,22 @@ def bench_kineto(fn, kernel_names, num_tests: int = 1,
     flush_l2_size = int(8e9 // 4)
 
     with _CudaClosureContext(fn, tensor_vars):
+        # Print I/O info for the kernel being benchmarked
+        io_tensors = None
+        kernel_io_name = kernel_names if isinstance(kernel_names, str) else kernel_names[0]
+        if tensor_vars is not None:
+            free_vars = fn.__code__.co_freevars
+            closure = fn.__closure__ or ()
+            name_to_cell = dict(zip(free_vars, closure))
+            io_tensors = {name: name_to_cell[name].cell_contents for name in tensor_vars if name in name_to_cell}
+            print_kernel_io(kernel_io_name, io_tensors, {})
+
         # For some auto-tuning kernels with prints
         fn()
+
+        # Print output I/O info (same tensors, may have been modified in-place)
+        if io_tensors is not None:
+            print_kernel_io(kernel_io_name, {}, io_tensors)
 
         # Profile
         suppress = suppress_stdout_stderr if suppress_kineto_output else empty_suppress
