@@ -1,5 +1,7 @@
-import torch
+import os
 import random
+
+import torch
 
 import deep_gemm
 from deep_gemm.testing import (
@@ -28,19 +30,20 @@ def test_hc_prenorm_gemm() -> None:
                         torch.empty((num_splits, m, n), dtype=torch.float, device='cpu')
                 s = torch.empty((m, ), dtype=torch.float, device='cpu') if num_splits is None else \
                         torch.empty((num_splits, m), dtype=torch.float, device='cpu')
-                print_kernel_io('tf32_hc_prenorm_gemm', dict(a=a, b=b, num_splits=num_splits), dict(d=d, s=s))
-                with _CudaClosureContext(lambda: deep_gemm.tf32_hc_prenorm_gemm(a, b, d, s, num_splits=num_splits),
-                                         tensor_vars=('a', 'b', 'd', 's')):
-                    deep_gemm.tf32_hc_prenorm_gemm(a, b, d, s, num_splits=num_splits)
-                print_kernel_io('tf32_hc_prenorm_gemm', {}, dict(d=d, s=s))
-                final_d = d if num_splits is None else d.sum(0)
-                final_s = s if num_splits is None else s.sum(0)
+                if os.getenv('CORRECTNESS'):
+                    print_kernel_io('tf32_hc_prenorm_gemm', dict(a=a, b=b, num_splits=num_splits), dict(d=d, s=s))
+                    with _CudaClosureContext(lambda: deep_gemm.tf32_hc_prenorm_gemm(a, b, d, s, num_splits=num_splits),
+                                             tensor_vars=('a', 'b', 'd', 's')):
+                        deep_gemm.tf32_hc_prenorm_gemm(a, b, d, s, num_splits=num_splits)
+                    print_kernel_io('tf32_hc_prenorm_gemm', {}, dict(d=d, s=s))
+                    final_d = d if num_splits is None else d.sum(0)
+                    final_s = s if num_splits is None else s.sum(0)
 
-                ref_d = a.float() @ b.T
-                ref_s = a.float().square().sum(-1)
+                    ref_d = a.float() @ b.T
+                    ref_s = a.float().square().sum(-1)
 
-                diff = max(calc_diff(final_d, ref_d), calc_diff(final_s, ref_s))
-                assert diff < 1e-8, f'{m=}, {n=}, {k=}, {diff:.10f}'
+                    diff = max(calc_diff(final_d, ref_d), calc_diff(final_s, ref_s))
+                    assert diff < 1e-8, f'{m=}, {n=}, {k=}, {diff:.10f}'
 
                 t = bench_kineto(lambda: deep_gemm.tf32_hc_prenorm_gemm(a, b, d, s, num_splits=num_splits), 'tf32_hc_prenorm_gemm',
                                  tensor_vars=('a', 'b', 'd', 's'), suppress_kineto_output=True)

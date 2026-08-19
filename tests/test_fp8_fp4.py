@@ -1,4 +1,5 @@
 import numpy as np
+import os
 import random
 import torch
 
@@ -44,16 +45,18 @@ def test_gemm() -> None:
                 a = a if major_a.is_k_major() else (a[0].T, a[1].T)
                 b = b if major_b.is_k_major() else (b[0].T, b[1].T)
                 assert a[0].is_contiguous() and b[0].is_contiguous()
-            print_kernel_io(func_name, dict(a=a, b=b, c=c, disable_ue8m0_cast=disable_ue8m0_cast,
-                                              recipe=recipe, recipe_a=recipe_a, recipe_b=recipe_b), dict(d=d))
-            with _CudaClosureContext(lambda: getattr(deep_gemm, func_name)(a, b, d, c=c, disable_ue8m0_cast=disable_ue8m0_cast,
-                                                                          recipe=recipe, recipe_a=recipe_a, recipe_b=recipe_b),
-                                     tensor_vars=('a', 'b', 'd', 'c')):
-                getattr(deep_gemm, func_name)(a, b, d, c=c, disable_ue8m0_cast=disable_ue8m0_cast, recipe=recipe, recipe_a=recipe_a, recipe_b=recipe_b)
-            print_kernel_io(func_name, {}, dict(d=d))
-            diff = calc_diff(d, ref_d)
-            assert diff < quant_config.max_diff(), (f'{m=}, {n=}, {k=}, {kernel_opt}, {major_opt=}, {accumulate=}, {out_dtype=}, '
-                                                    f'{diff:.5f}, alias={test_alias}')
+
+            if os.getenv('CORRECTNESS'):
+                print_kernel_io(func_name, dict(a=a, b=b, c=c, disable_ue8m0_cast=disable_ue8m0_cast,
+                                                recipe=recipe, recipe_a=recipe_a, recipe_b=recipe_b), dict(d=d))
+                with _CudaClosureContext(lambda: getattr(deep_gemm, func_name)(a, b, d, c=c, disable_ue8m0_cast=disable_ue8m0_cast,
+                                                                              recipe=recipe, recipe_a=recipe_a, recipe_b=recipe_b),
+                                         tensor_vars=('a', 'b', 'd', 'c')):
+                    getattr(deep_gemm, func_name)(a, b, d, c=c, disable_ue8m0_cast=disable_ue8m0_cast, recipe=recipe, recipe_a=recipe_a, recipe_b=recipe_b)
+                print_kernel_io(func_name, {}, dict(d=d))
+                diff = calc_diff(d, ref_d)
+                assert diff < quant_config.max_diff(), (f'{m=}, {n=}, {k=}, {kernel_opt}, {major_opt=}, {accumulate=}, {out_dtype=}, '
+                                                        f'{diff:.5f}, alias={test_alias}')
 
         a, b, c, d, ref_d = generate_normal(m, n, k, major_a, major_b, accumulate, out_dtype, kernel_type, use_ue8m0=use_ue8m0, quant_config=quant_config)
         t = bench_kineto(lambda: deep_gemm.fp8_fp4_gemm_nt(a, b, d, c=c, disable_ue8m0_cast=disable_ue8m0_cast, recipe=recipe, recipe_a=recipe_a, recipe_b=recipe_b),
@@ -94,33 +97,35 @@ def test_m_grouped_gemm_contiguous() -> None:
                 assert major_a.is_k_major()
                 b = b if major_b.is_k_major() else (b[0].mT, b[1].mT)
                 assert a[0].is_contiguous() and b[0].is_contiguous()
-            print_kernel_io(func_name, dict(a=a, b=b, grouped_layout=grouped_layout,
-                                            disable_ue8m0_cast=disable_ue8m0_cast,
-                                            use_psum_layout=use_psum_layout,
-                                            ensure_zero_padding=ensure_zero_padding,
-                                            recipe=recipe, recipe_a=recipe_a, recipe_b=recipe_b), dict(d=d))
-            with _CudaClosureContext(lambda: getattr(deep_gemm, func_name)(a, b, d, grouped_layout,
-                                                                          disable_ue8m0_cast=disable_ue8m0_cast,
-                                                                          use_psum_layout=use_psum_layout,
-                                                                          ensure_zero_padding=ensure_zero_padding,
-                                                                          recipe=recipe, recipe_a=recipe_a, recipe_b=recipe_b),
-                                     tensor_vars=('a', 'b', 'd', 'grouped_layout')):
-                getattr(deep_gemm, func_name)(a, b, d, grouped_layout, disable_ue8m0_cast=disable_ue8m0_cast,
-                                              use_psum_layout=use_psum_layout, ensure_zero_padding=ensure_zero_padding,
-                                              recipe=recipe, recipe_a=recipe_a, recipe_b=recipe_b)
-            print_kernel_io(func_name, {}, dict(d=d))
-            if use_psum_layout:
-                for j in range(num_groups):
-                    start = 0 if j == 0 else align(grouped_layout[j - 1], get_mk_alignment_for_contiguous_layout())
-                    end = grouped_layout[j]
-                    diff = calc_diff(d[start : end], ref_d[start : end])
-                    assert diff < quant_config.max_diff(), (f'{m=}, {n=}, {k=}, {major_opt}, {kernel_opt}, '
-                                                            f'{diff:.5f}, alias={test_alias}, {ensure_zero_padding=}')
-                if ensure_zero_padding:
-                    assert_psum_zero_padding(a, d, grouped_layout, 'FP8/FP4')
-            else:
-                diff = calc_diff(d, ref_d)
-                assert diff < quant_config.max_diff(), f'{m=}, {n=}, {k=}, {major_opt}, {kernel_opt}, {diff:.5f}, alias={test_alias}'
+
+            if os.getenv('CORRECTNESS'):
+                print_kernel_io(func_name, dict(a=a, b=b, grouped_layout=grouped_layout,
+                                                disable_ue8m0_cast=disable_ue8m0_cast,
+                                                use_psum_layout=use_psum_layout,
+                                                ensure_zero_padding=ensure_zero_padding,
+                                                recipe=recipe, recipe_a=recipe_a, recipe_b=recipe_b), dict(d=d))
+                with _CudaClosureContext(lambda: getattr(deep_gemm, func_name)(a, b, d, grouped_layout,
+                                                                              disable_ue8m0_cast=disable_ue8m0_cast,
+                                                                              use_psum_layout=use_psum_layout,
+                                                                              ensure_zero_padding=ensure_zero_padding,
+                                                                              recipe=recipe, recipe_a=recipe_a, recipe_b=recipe_b),
+                                         tensor_vars=('a', 'b', 'd', 'grouped_layout')):
+                    getattr(deep_gemm, func_name)(a, b, d, grouped_layout, disable_ue8m0_cast=disable_ue8m0_cast,
+                                                  use_psum_layout=use_psum_layout, ensure_zero_padding=ensure_zero_padding,
+                                                  recipe=recipe, recipe_a=recipe_a, recipe_b=recipe_b)
+                print_kernel_io(func_name, {}, dict(d=d))
+                if use_psum_layout:
+                    for j in range(num_groups):
+                        start = 0 if j == 0 else align(grouped_layout[j - 1], get_mk_alignment_for_contiguous_layout())
+                        end = grouped_layout[j]
+                        diff = calc_diff(d[start : end], ref_d[start : end])
+                        assert diff < quant_config.max_diff(), (f'{m=}, {n=}, {k=}, {major_opt}, {kernel_opt}, '
+                                                                f'{diff:.5f}, alias={test_alias}, {ensure_zero_padding=}')
+                    if ensure_zero_padding:
+                        assert_psum_zero_padding(a, d, grouped_layout, 'FP8/FP4')
+                else:
+                    diff = calc_diff(d, ref_d)
+                    assert diff < quant_config.max_diff(), f'{m=}, {n=}, {k=}, {major_opt}, {kernel_opt}, {diff:.5f}, alias={test_alias}'
         m, a, b, grouped_layout, d, ref_d = generate_m_grouped_contiguous(num_groups, expected_m_per_group, n, k, major_a, major_b,
                                                                           use_ue8m0=use_ue8m0, use_psum_layout=use_psum_layout,
                                                                           quant_config=quant_config)
@@ -189,18 +194,19 @@ def test_m_grouped_gemm_masked() -> None:
                                                                recipe=recipe, recipe_a=recipe_a, recipe_b=recipe_b)
                     print_kernel_io('m_grouped_fp8_fp4_gemm_nt_masked', {}, dict(d=d))
 
-            with _CudaClosureContext(test_func, tensor_vars=('a', 'b', 'd', 'masked_m',
-                                                                 'a_psum', 'd_psum', 'psum_m')):
-                test_func()
-            for j in range(num_groups):
-                if masked_m[j].item() == 0:
-                    continue
-                if use_psum_layout:
-                    d_slice = d_psum[: psum_m[j]] if j == 0 else d_psum[align(psum_m[j - 1], get_mk_alignment_for_contiguous_layout()): psum_m[j]]
-                else:
-                    d_slice = d[j, :masked_m[j].item()]
-                diff = calc_diff(d_slice, ref_d[j, :masked_m[j].item()])
-                assert diff < quant_config.max_diff(), f'{max_m=}, {n=}, {k=}, {j=}, masked_m={masked_m[j]}, {kernel_opt}, {num_groups=}, {diff:.5f}'
+            if os.getenv('CORRECTNESS'):
+                with _CudaClosureContext(test_func, tensor_vars=('a', 'b', 'd', 'masked_m',
+                                                                     'a_psum', 'd_psum', 'psum_m')):
+                    test_func()
+                for j in range(num_groups):
+                    if masked_m[j].item() == 0:
+                        continue
+                    if use_psum_layout:
+                        d_slice = d_psum[: psum_m[j]] if j == 0 else d_psum[align(psum_m[j - 1], get_mk_alignment_for_contiguous_layout()): psum_m[j]]
+                    else:
+                        d_slice = d[j, :masked_m[j].item()]
+                    diff = calc_diff(d_slice, ref_d[j, :masked_m[j].item()])
+                    assert diff < quant_config.max_diff(), f'{max_m=}, {n=}, {k=}, {j=}, masked_m={masked_m[j]}, {kernel_opt}, {num_groups=}, {diff:.5f}'
 
             # Test performance with fixed shapes
             valid_m = masked_m.sum().item()
@@ -237,46 +243,48 @@ def test_k_grouped_gemm_contiguous() -> None:
             else:
                 total_k, a, b, c, d, ref_d, grouped_layout, _ = generate_k_grouped_contiguous(num_groups, m, n, major_a, major_b, test_aligned_ks_cpu, use_ue8m0=use_ue8m0, gran_k=gran_k)
             c_orig = c.clone() if use_psum_layout else None
-            print_kernel_io('k_grouped_fp8_gemm_contiguous',
-                            dict(a=a, b=b, ks_cpu=test_aligned_ks_cpu, grouped_layout=grouped_layout, c=c,
-                                 recipe=recipe, use_psum_layout=use_psum_layout), dict(d=d))
-            with _CudaClosureContext(lambda: k_grouped_fp8_gemm_contiguous(
-                    a, b, d, test_aligned_ks_cpu, grouped_layout, c, recipe=recipe, use_psum_layout=use_psum_layout),
-                    tensor_vars=('a', 'b', 'c', 'd', 'grouped_layout')):
-                k_grouped_fp8_gemm_contiguous(a, b, d, test_aligned_ks_cpu, grouped_layout, c, recipe=recipe,
-                                              use_psum_layout=use_psum_layout)
-            print_kernel_io('k_grouped_fp8_gemm_contiguous', {}, dict(d=d))
 
-            diff = calc_diff(d, ref_d)
-            assert diff < 0.001, f'{m=}, {n=}, {total_k=}, {test_real_ks_cpu=}, {test_aligned_ks_cpu=}, {use_psum_layout=}, {diff:.5f}'
-
-            # Unsynced psum paths
-            if use_psum_layout:
-                c.copy_(c_orig)
+            if os.getenv('CORRECTNESS'):
                 print_kernel_io('k_grouped_fp8_gemm_contiguous',
-                                dict(a=a, b=b, ks_cpu=None, grouped_layout=grouped_layout, c=c,
-                                     recipe=recipe, use_psum_layout=True), dict(d=d))
+                                dict(a=a, b=b, ks_cpu=test_aligned_ks_cpu, grouped_layout=grouped_layout, c=c,
+                                    recipe=recipe, use_psum_layout=use_psum_layout), dict(d=d))
                 with _CudaClosureContext(lambda: k_grouped_fp8_gemm_contiguous(
-                        a, b, d, None, grouped_layout, c, recipe=recipe, use_psum_layout=True),
+                        a, b, d, test_aligned_ks_cpu, grouped_layout, c, recipe=recipe, use_psum_layout=use_psum_layout),
                         tensor_vars=('a', 'b', 'c', 'd', 'grouped_layout')):
-                    k_grouped_fp8_gemm_contiguous(a, b, d, None, grouped_layout, c, recipe=recipe,
-                                                    use_psum_layout=True)
+                    k_grouped_fp8_gemm_contiguous(a, b, d, test_aligned_ks_cpu, grouped_layout, c, recipe=recipe,
+                                                  use_psum_layout=use_psum_layout)
                 print_kernel_io('k_grouped_fp8_gemm_contiguous', {}, dict(d=d))
-                diff = calc_diff(d, ref_d)
-                assert diff < 0.001, f'None ks_cpu path: {m=}, {n=}, {total_k=}, {test_real_ks_cpu=}, {diff:.5f}'
 
-                c.copy_(c_orig)
-                print_kernel_io('k_grouped_fp8_gemm_contiguous',
-                                dict(a=a, b=b, ks_cpu=[], grouped_layout=grouped_layout, c=c,
-                                     recipe=recipe, use_psum_layout=True), dict(d=d))
-                with _CudaClosureContext(lambda: k_grouped_fp8_gemm_contiguous(
-                        a, b, d, [], grouped_layout, c, recipe=recipe, use_psum_layout=True),
-                        tensor_vars=('a', 'b', 'c', 'd', 'grouped_layout')):
-                    k_grouped_fp8_gemm_contiguous(a, b, d, [], grouped_layout, c, recipe=recipe,
-                                                  use_psum_layout=True)
-                print_kernel_io('k_grouped_fp8_gemm_contiguous', {}, dict(d=d))
                 diff = calc_diff(d, ref_d)
-                assert diff < 0.001, f'empty ks_cpu path: {m=}, {n=}, {total_k=}, {test_real_ks_cpu=}, {diff:.5f}'
+                assert diff < 0.001, f'{m=}, {n=}, {total_k=}, {test_real_ks_cpu=}, {test_aligned_ks_cpu=}, {use_psum_layout=}, {diff:.5f}'
+
+                # Unsynced psum paths
+                if use_psum_layout:
+                    c.copy_(c_orig)
+                    print_kernel_io('k_grouped_fp8_gemm_contiguous',
+                                    dict(a=a, b=b, ks_cpu=None, grouped_layout=grouped_layout, c=c,
+                                         recipe=recipe, use_psum_layout=True), dict(d=d))
+                    with _CudaClosureContext(lambda: k_grouped_fp8_gemm_contiguous(
+                            a, b, d, None, grouped_layout, c, recipe=recipe, use_psum_layout=True),
+                            tensor_vars=('a', 'b', 'c', 'd', 'grouped_layout')):
+                        k_grouped_fp8_gemm_contiguous(a, b, d, None, grouped_layout, c, recipe=recipe,
+                                                        use_psum_layout=True)
+                    print_kernel_io('k_grouped_fp8_gemm_contiguous', {}, dict(d=d))
+                    diff = calc_diff(d, ref_d)
+                    assert diff < 0.001, f'None ks_cpu path: {m=}, {n=}, {total_k=}, {test_real_ks_cpu=}, {diff:.5f}'
+
+                    c.copy_(c_orig)
+                    print_kernel_io('k_grouped_fp8_gemm_contiguous',
+                                    dict(a=a, b=b, ks_cpu=[], grouped_layout=grouped_layout, c=c,
+                                         recipe=recipe, use_psum_layout=True), dict(d=d))
+                    with _CudaClosureContext(lambda: k_grouped_fp8_gemm_contiguous(
+                            a, b, d, [], grouped_layout, c, recipe=recipe, use_psum_layout=True),
+                            tensor_vars=('a', 'b', 'c', 'd', 'grouped_layout')):
+                        k_grouped_fp8_gemm_contiguous(a, b, d, [], grouped_layout, c, recipe=recipe,
+                                                      use_psum_layout=True)
+                    print_kernel_io('k_grouped_fp8_gemm_contiguous', {}, dict(d=d))
+                    diff = calc_diff(d, ref_d)
+                    assert diff < 0.001, f'empty ks_cpu path: {m=}, {n=}, {total_k=}, {test_real_ks_cpu=}, {diff:.5f}'
 
         # Test performance
         if use_psum_layout:

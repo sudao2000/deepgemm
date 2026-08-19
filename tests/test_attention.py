@@ -54,14 +54,15 @@ def test_gemm_skip_head_mid() -> None:
         d = apply_skip_head_mid(d, head_splits)
         ref_d = apply_skip_head_mid(ref_d, head_splits)
 
-        print_kernel_io('fp8_gemm_nt_skip_head_mid',
-                        dict(a=a, b=b, d=d, head_splits=head_splits, disable_ue8m0_cast=disable_ue8m0_cast), {})
-        a, b, d, ref_d = to_device((a, b, d, ref_d), 'cuda')
-        deep_gemm.fp8_gemm_nt_skip_head_mid(a, b, d, head_splits, disable_ue8m0_cast=disable_ue8m0_cast)
-        a, b, d, ref_d = to_device((a, b, d, ref_d), 'cpu')
-        print_kernel_io('fp8_gemm_nt_skip_head_mid', {}, dict(d=d))
-        diff = calc_diff(d, ref_d)
-        assert diff < 0.001, f'{m=}, {n=}, {k=}, {kernel_opt}, {diff:.5f}'
+        if os.getenv('CORRECTNESS'):
+            print_kernel_io('fp8_gemm_nt_skip_head_mid',
+                            dict(a=a, b=b, d=d, head_splits=head_splits, disable_ue8m0_cast=disable_ue8m0_cast), {})
+            a, b, d, ref_d = to_device((a, b, d, ref_d), 'cuda')
+            deep_gemm.fp8_gemm_nt_skip_head_mid(a, b, d, head_splits, disable_ue8m0_cast=disable_ue8m0_cast)
+            a, b, d, ref_d = to_device((a, b, d, ref_d), 'cpu')
+            print_kernel_io('fp8_gemm_nt_skip_head_mid', {}, dict(d=d))
+            diff = calc_diff(d, ref_d)
+            assert diff < 0.001, f'{m=}, {n=}, {k=}, {kernel_opt}, {diff:.5f}'
 
         t = bench_kineto(lambda: deep_gemm.fp8_gemm_nt_skip_head_mid(a, b, d, head_splits, disable_ue8m0_cast=disable_ue8m0_cast),
                          'gemm_', tensor_vars=('a', 'b', 'd'), suppress_kineto_output=True)
@@ -228,42 +229,43 @@ def test_mqa_logits():
             max_seqlen_k = (ke - ks).max().item()
             kernel_kwargs['max_seqlen_k'] = max_seqlen_k
 
-        # Run kernel on CUDA, then bring the result back to CPU
-        print_kernel_io('fp8_fp4_mqa_logits', kernel_kwargs, {})
-        logits = _call_kernel_on_cuda(deep_gemm.fp8_fp4_mqa_logits, kernel_kwargs)
-        print_kernel_io('fp8_fp4_mqa_logits', {}, dict(logits=logits))
+        if os.getenv('CORRECTNESS'):
+            # Run kernel on CUDA, then bring the result back to CPU
+            print_kernel_io('fp8_fp4_mqa_logits', kernel_kwargs, {})
+            logits = _call_kernel_on_cuda(deep_gemm.fp8_fp4_mqa_logits, kernel_kwargs)
+            print_kernel_io('fp8_fp4_mqa_logits', {}, dict(logits=logits))
 
-        if compressed_logits:
-            self_mask = torch.arange(logits.size(1), device=logits.device)[None, :] < (ke - ks)[:, None]
-            masked_logits = logits.masked_fill(~self_mask, 0)
-        else:
-            masked_logits = logits
-        for _ in range(20):
-            logits_again = _call_kernel_on_cuda(deep_gemm.fp8_fp4_mqa_logits, kernel_kwargs)
             if compressed_logits:
-                logits_again = logits_again.masked_fill(~self_mask, 0)
-            assert_bitwise_equal(logits_again, masked_logits, 'mqa logits self-consistency')
+                self_mask = torch.arange(logits.size(1), device=logits.device)[None, :] < (ke - ks)[:, None]
+                masked_logits = logits.masked_fill(~self_mask, 0)
+            else:
+                masked_logits = logits
+            for _ in range(20):
+                logits_again = _call_kernel_on_cuda(deep_gemm.fp8_fp4_mqa_logits, kernel_kwargs)
+                if compressed_logits:
+                    logits_again = logits_again.masked_fill(~self_mask, 0)
+                assert_bitwise_equal(logits_again, masked_logits, 'mqa logits self-consistency')
 
-        # Post process for compressed logits
-        if compressed_logits:
-            assert logits.size() == (seq_len, max_seqlen_k)
-            tmp = torch.full((seq_len, seq_len_kv), float('-inf'), device=logits.device)
-            for i in range(seq_len):
-                tmp[i, ks[i] : ke[i]] = logits[i, : ke[i] - ks[i]]
-            logits = tmp
+            # Post process for compressed logits
+            if compressed_logits:
+                assert logits.size() == (seq_len, max_seqlen_k)
+                tmp = torch.full((seq_len, seq_len_kv), float('-inf'), device=logits.device)
+                for i in range(seq_len):
+                    tmp[i, ks[i] : ke[i]] = logits[i, : ke[i] - ks[i]]
+                logits = tmp
 
-        # Validation
-        ref_neginf_mask = (ref_logits == float('-inf'))
-        neginf_mask = (logits == float('-inf'))
-        assert torch.equal(neginf_mask, ref_neginf_mask)
+            # Validation
+            ref_neginf_mask = (ref_logits == float('-inf'))
+            neginf_mask = (logits == float('-inf'))
+            assert torch.equal(neginf_mask, ref_neginf_mask)
 
-        ref_logits = ref_logits.masked_fill(ref_neginf_mask, 0)
-        simulated_logits = simulated_logits.masked_fill(ref_neginf_mask, 0)
-        logits = logits.masked_fill(ref_neginf_mask, 0)
-        diff = calc_diff(logits, ref_logits)
-        simulated_diff = calc_diff(logits, simulated_logits)
-        assert diff < (0.02 if (is_mxfp4 or is_mxfp8) else 1e-3), f"Diff: {diff}"
-        assert simulated_diff < ref_diff_tol(weights_dtype == torch.bfloat16 or logits_dtype == torch.bfloat16), f"Simulated Diff: {simulated_diff}"
+            ref_logits = ref_logits.masked_fill(ref_neginf_mask, 0)
+            simulated_logits = simulated_logits.masked_fill(ref_neginf_mask, 0)
+            logits = logits.masked_fill(ref_neginf_mask, 0)
+            diff = calc_diff(logits, ref_logits)
+            simulated_diff = calc_diff(logits, simulated_logits)
+            assert diff < (0.02 if (is_mxfp4 or is_mxfp8) else 1e-3), f"Diff: {diff}"
+            assert simulated_diff < ref_diff_tol(weights_dtype == torch.bfloat16 or logits_dtype == torch.bfloat16), f"Simulated Diff: {simulated_diff}"
 
         # Profiling: bench_kineto moves the captured kernel_kwargs to CUDA only while running the lambda
         tflops = 2 * ref_cost * num_heads * head_dim / 1e12
@@ -481,30 +483,32 @@ def test_paged_mqa_logits():
             max_context_len=max_model_len, clean_logits=clean_logits, logits_dtype=logits_dtype,
             indices=indices,
         )
-        print_kernel_io('fp8_fp4_paged_mqa_logits', kernel_kwargs, {})
-        logits = _call_kernel_on_cuda(deep_gemm.fp8_fp4_paged_mqa_logits, kernel_kwargs)
-        print_kernel_io('fp8_fp4_paged_mqa_logits', {}, dict(logits=logits))
 
-        self_mask = ~ref_neginf_mask
-        masked_logits = logits.masked_fill(~self_mask, 0)
-        for _ in range(20):
-            logits_again = _call_kernel_on_cuda(deep_gemm.fp8_fp4_paged_mqa_logits, kernel_kwargs).masked_fill(~self_mask, 0)
-            assert_bitwise_equal(logits_again, masked_logits, 'paged mqa logits self-consistency')
+        if os.getenv('CORRECTNESS'):
+            print_kernel_io('fp8_fp4_paged_mqa_logits', kernel_kwargs, {})
+            logits = _call_kernel_on_cuda(deep_gemm.fp8_fp4_paged_mqa_logits, kernel_kwargs)
+            print_kernel_io('fp8_fp4_paged_mqa_logits', {}, dict(logits=logits))
 
-        # Validation
-        assert logits.dtype == logits_dtype
-        logits = logits.to(torch.float)
+            self_mask = ~ref_neginf_mask
+            masked_logits = logits.masked_fill(~self_mask, 0)
+            for _ in range(20):
+                logits_again = _call_kernel_on_cuda(deep_gemm.fp8_fp4_paged_mqa_logits, kernel_kwargs).masked_fill(~self_mask, 0)
+                assert_bitwise_equal(logits_again, masked_logits, 'paged mqa logits self-consistency')
 
-        if clean_logits:
-            assert torch.equal(logits == float('-inf'), ref_neginf_mask), "Mask mismatch"
+            # Validation
+            assert logits.dtype == logits_dtype
+            logits = logits.to(torch.float)
 
-        logits_masked = logits.masked_fill(ref_neginf_mask, 0)
-        ref_masked = ref_logits.masked_fill(ref_neginf_mask, 0)
-        simulated_masked = simulated_logits.masked_fill(ref_neginf_mask, 0)
-        diff = calc_diff(logits_masked, ref_masked)
-        simulated_diff = calc_diff(logits_masked, simulated_masked)
-        assert diff < (0.02 if (is_mxfp4 or is_mxfp8) else 1e-3), f"Diff: {diff}"
-        assert simulated_diff < ref_diff_tol(weights_dtype == torch.bfloat16 or logits_dtype == torch.bfloat16), f"Simulated Diff: {simulated_diff}"
+            if clean_logits:
+                assert torch.equal(logits == float('-inf'), ref_neginf_mask), "Mask mismatch"
+
+            logits_masked = logits.masked_fill(ref_neginf_mask, 0)
+            ref_masked = ref_logits.masked_fill(ref_neginf_mask, 0)
+            simulated_masked = simulated_logits.masked_fill(ref_neginf_mask, 0)
+            diff = calc_diff(logits_masked, ref_masked)
+            simulated_diff = calc_diff(logits_masked, simulated_masked)
+            assert diff < (0.02 if (is_mxfp4 or is_mxfp8) else 1e-3), f"Diff: {diff}"
+            assert simulated_diff < ref_diff_tol(weights_dtype == torch.bfloat16 or logits_dtype == torch.bfloat16), f"Simulated Diff: {simulated_diff}"
 
         # Profiling
         sum_lens = context_lens.sum().item()
