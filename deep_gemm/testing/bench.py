@@ -5,6 +5,19 @@ import torch
 from typing import Callable, Iterable, Optional, Union
 
 
+def _to_cpu_for_print(obj):
+    """Recursively create CPU copies of Tensors for I/O printing without mutating the originals."""
+    if isinstance(obj, torch.Tensor):
+        return obj.cpu()
+    if isinstance(obj, tuple):
+        return tuple(_to_cpu_for_print(x) for x in obj)
+    if isinstance(obj, list):
+        return [_to_cpu_for_print(x) for x in obj]
+    if isinstance(obj, dict):
+        return {k: _to_cpu_for_print(v) for k, v in obj.items()}
+    return obj
+
+
 def _fmt_param(v):
     if isinstance(v, torch.Tensor):
         return f'Tensor(shape={tuple(v.shape)}, dtype={v.dtype})'
@@ -180,21 +193,27 @@ def bench_kineto(fn, kernel_names, num_tests: int = 1,
 
     with _CudaClosureContext(fn, tensor_vars):
         # Print I/O info for the kernel being benchmarked
-        io_tensors = None
+        io_inputs, io_outputs = {}, {}
+        io_output_cells = {}
         kernel_io_name = kernel_names if isinstance(kernel_names, str) else kernel_names[0]
         if tensor_vars is not None:
             free_vars = fn.__code__.co_freevars
             closure = fn.__closure__ or ()
             name_to_cell = dict(zip(free_vars, closure))
-            io_tensors = {name: name_to_cell[name].cell_contents for name in tensor_vars if name in name_to_cell}
-            print_kernel_io(kernel_io_name, io_tensors, {})
+            for name in tensor_vars:
+                if name not in name_to_cell:
+                    continue
+                if name == 'kernel_kwargs':
+                    continue
+                if name == 'd':
+                    io_outputs[name] = _to_cpu_for_print(name_to_cell[name].cell_contents)
+                    io_output_cells[name] = name_to_cell[name]
+                else:
+                    io_inputs[name] = _to_cpu_for_print(name_to_cell[name].cell_contents)
+            print_kernel_io(kernel_io_name, io_inputs, io_outputs)
 
         # For some auto-tuning kernels with prints
         fn()
-
-        # Print output I/O info (same tensors, may have been modified in-place)
-        if io_tensors is not None:
-            print_kernel_io(kernel_io_name, {}, io_tensors)
 
         # Profile
         suppress = suppress_stdout_stderr if suppress_kineto_output else empty_suppress
