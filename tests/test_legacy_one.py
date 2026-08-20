@@ -27,8 +27,8 @@ import torch
 import test_legacy
 
 SUITES = {
-    'm_grouped': ('enumerate_m_grouped_contiguous', test_legacy.test_m_grouped_gemm_contiguous_tl),
-    'k_grouped': ('enumerate_k_grouped_contiguous', test_legacy.test_k_grouped_gemm_contiguous_tl),
+    'test_m_grouped_gemm_contiguous_tl': ('enumerate_m_grouped_contiguous', test_legacy.test_m_grouped_gemm_contiguous_tl),
+    'test_k_grouped_gemm_contiguous_tl': ('enumerate_k_grouped_contiguous', test_legacy.test_k_grouped_gemm_contiguous_tl),
 }
 
 

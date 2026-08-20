@@ -26,10 +26,10 @@ import torch
 import test_fp8_fp4
 
 SUITES = {
-    'gemm':         ('enumerate_normal',                 test_fp8_fp4.test_gemm),
-    'm_contiguous': ('enumerate_m_grouped_contiguous',   test_fp8_fp4.test_m_grouped_gemm_contiguous),
-    'm_masked':     ('enumerate_m_grouped_masked',       test_fp8_fp4.test_m_grouped_gemm_masked),
-    'k_contiguous': ('enumerate_k_grouped_contiguous',   test_fp8_fp4.test_k_grouped_gemm_contiguous),
+    'test_gemm':         ('enumerate_normal',                 test_fp8_fp4.test_gemm),
+    'test_m_grouped_gemm_contiguous': ('enumerate_m_grouped_contiguous',   test_fp8_fp4.test_m_grouped_gemm_contiguous),
+    'test_m_grouped_gemm_masked':     ('enumerate_m_grouped_masked',       test_fp8_fp4.test_m_grouped_gemm_masked),
+    'test_k_grouped_gemm_contiguous': ('enumerate_k_grouped_contiguous',   test_fp8_fp4.test_k_grouped_gemm_contiguous),
 }
 
 

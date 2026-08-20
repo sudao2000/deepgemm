@@ -25,9 +25,9 @@ import torch
 import test_layout
 
 SUITES = {
-    'sf':         ('enumerate_sf_layout',                test_layout.test_sf_layout_kernels),
-    'k_grouped':  ('enumerate_k_grouped_sf_layout',      test_layout.test_k_grouped_sf_layout_kernels),
-    'psum':       ('enumerate_k_grouped_psum_sf_layout', test_layout.test_k_grouped_psum_sf_layout_kernels),
+    'test_sf_layout_kernels':         ('enumerate_sf_layout',                test_layout.test_sf_layout_kernels),
+    'test_k_grouped_sf_layout_kernels':  ('enumerate_k_grouped_sf_layout',      test_layout.test_k_grouped_sf_layout_kernels),
+    'test_k_grouped_psum_sf_layout_kernels':       ('enumerate_k_grouped_psum_sf_layout', test_layout.test_k_grouped_psum_sf_layout_kernels),
 }
 
 

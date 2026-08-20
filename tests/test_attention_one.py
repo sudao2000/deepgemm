@@ -20,9 +20,9 @@ import torch
 import test_attention
 
 SUITES = {
-    'gemm':  ('enumerate_gemm_skip_head_mid', test_attention.test_gemm_skip_head_mid),
-    'mqa':   ('enumerate_mqa_logits',         test_attention.test_mqa_logits),
-    'paged': ('enumerate_paged_mqa_logits',   test_attention.test_paged_mqa_logits),
+    'test_gemm_skip_head_mid':  ('enumerate_gemm_skip_head_mid', test_attention.test_gemm_skip_head_mid),
+    'test_mqa_logits':   ('enumerate_mqa_logits',         test_attention.test_mqa_logits),
+    'test_paged_mqa_logits': ('enumerate_paged_mqa_logits',   test_attention.test_paged_mqa_logits),
 }
 
 

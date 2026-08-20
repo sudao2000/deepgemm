@@ -39,7 +39,7 @@ def main() -> None:
     selected = [cases[i] for i in indices]
     test_hyperconnection.enumerate_hc_prenorm_gemm = lambda: iter(selected)
     for i, (m, n, k, num_splits) in zip(indices, selected):
-        print(f'[test_hyperconnection #{i}] m={m}, n={n}, k={k}, num_splits={num_splits}')
+        print(f'[test_hyperconnection test_hc_prenorm_gemm #{i}] m={m}, n={n}, k={k}, num_splits={num_splits}')
     test_hyperconnection.test_hc_prenorm_gemm()
 
 

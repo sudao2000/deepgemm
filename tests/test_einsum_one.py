@@ -26,10 +26,10 @@ import torch
 import test_einsum
 
 SUITES = {
-    'bmk_bnk_mn':      ('enumerate_bmk_bnk_mn', test_einsum.test_bmk_bnk_mn),
-    'bhr_hdr_bhd':     ('enumerate_hrd_b',      test_einsum.test_bhr_hdr_bhd),
-    'bhd_hdr_bhr':     ('enumerate_hrd_b',      test_einsum.test_bhd_hdr_bhr),
-    'fp8_bhr_hdr_bhd': ('enumerate_fp8_hrd_b',  test_einsum.test_fp8_bhr_hdr_bhd),
+    'test_bmk_bnk_mn':      ('enumerate_bmk_bnk_mn', test_einsum.test_bmk_bnk_mn),
+    'test_bhr_hdr_bhd':     ('enumerate_hrd_b',      test_einsum.test_bhr_hdr_bhd),
+    'test_bhd_hdr_bhr':     ('enumerate_hrd_b',      test_einsum.test_bhd_hdr_bhr),
+    'test_fp8_bhr_hdr_bhd': ('enumerate_fp8_hrd_b',  test_einsum.test_fp8_bhr_hdr_bhd),
 }
 
 
