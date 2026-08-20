@@ -51,10 +51,10 @@ def test_gemm() -> None:
                                     f'{diff:.5f}, alias={test_alias}')
         a, b, c, d, ref_d = generate_normal(m, n, k, major_a, major_b, accumulate, out_dtype, kernel_type, use_bf16=True)
 
-        t = bench_kineto(lambda: deep_gemm.bf16_gemm_nt(a, b, d, c=c), 'bf16_gemm',
+        t = bench_kineto(lambda: deep_gemm.bf16_gemm_nt(a, b, d, c=c), 'bf16_gemm_nt',
                          tensor_vars=('a', 'b', 'c', 'd'),
                          input_vars=('a', 'b', 'c'), output_vars=('d',), suppress_kineto_output=True)
-        cublas_t, split_k_t = bench_kineto(lambda: deep_gemm.cublaslt_gemm_nt(a, b, d, c=c), ('nvjet', 'reduce'),
+        cublas_t, split_k_t = bench_kineto(lambda: deep_gemm.cublaslt_gemm_nt(a, b, d, c=c), 'cublaslt_gemm_nt',
                                            tensor_vars=('a', 'b', 'c', 'd'),
                                            input_vars=('a', 'b', 'c'), output_vars=('d',), suppress_kineto_output=True)
         print(f' > Perf (m={m:6}, n={n:6}, k={k:6}, layout={major_opt}, {out_opt}, {acc_opt}): '
@@ -117,7 +117,7 @@ def test_m_grouped_gemm_contiguous() -> None:
             deep_gemm.m_grouped_bf16_gemm_nt_contiguous(a, b, d, grouped_layout, use_psum_layout=use_psum_layout,
                                                         ensure_zero_padding=ensure_zero_padding)
 
-        t = bench_kineto(test_func, 'bf16_gemm',
+        t = bench_kineto(test_func, 'm_grouped_bf16_gemm_nt_contiguous',
                          tensor_vars=('a', 'b', 'd', 'grouped_layout'),
                          input_vars=('a', 'b', 'grouped_layout'), output_vars=('d',),
                          suppress_kineto_output=True)
@@ -183,7 +183,7 @@ def test_m_grouped_gemm_masked() -> None:
 
             # Test performance with fixed shapes
             valid_m = masked_m.sum().item()
-            t = bench_kineto(test_func, 'bf16_gemm',
+            t = bench_kineto(test_func, 'm_grouped_bf16_gemm_nt_masked',
                              tensor_vars=('a', 'b', 'd', 'masked_m',
                                           'a_psum', 'd_psum', 'psum_m'),
                              input_vars=('a', 'b', 'masked_m', 'a_psum', 'psum_m'),
@@ -266,7 +266,7 @@ def test_k_grouped_gemm_contiguous() -> None:
         def test_func():
             deep_gemm.k_grouped_bf16_gemm_tn_contiguous(a, b, d, aligned_ks_cpu, grouped_layout, c, use_psum_layout=use_psum_layout)
 
-        t = bench_kineto(test_func, 'bf16_gemm',
+        t = bench_kineto(test_func, 'k_grouped_bf16_gemm_tn_contiguous',
                          tensor_vars=('a', 'b', 'c', 'd', 'grouped_layout'),
                          input_vars=('a', 'b', 'c', 'grouped_layout'),
                          output_vars=('d',), suppress_kineto_output=True)

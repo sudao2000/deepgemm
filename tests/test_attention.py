@@ -65,7 +65,7 @@ def test_gemm_skip_head_mid() -> None:
             assert diff < 0.001, f'{m=}, {n=}, {k=}, {kernel_opt}, {diff:.5f}'
 
         t = bench_kineto(lambda: deep_gemm.fp8_gemm_nt_skip_head_mid(a, b, d, head_splits, disable_ue8m0_cast=disable_ue8m0_cast),
-                         'gemm_', tensor_vars=('a', 'b', 'd'),
+                         'fp8_gemm_nt_skip_head_mid', tensor_vars=('a', 'b', 'd'),
                          input_vars=('a', 'b'), output_vars=('d',), suppress_kineto_output=True)
         print(f' > Perf (m={m:5}, n={n:5}, k={k:5}, {kernel_opt}): '
               f'{t * 1e6:4.0f} us | '
@@ -270,7 +270,7 @@ def test_mqa_logits():
 
         # Profiling: bench_kineto moves the captured kernel_kwargs to CUDA only while running the lambda
         tflops = 2 * ref_cost * num_heads * head_dim / 1e12
-        t, clean_t = bench_kineto(lambda: deep_gemm.fp8_fp4_mqa_logits(**kernel_kwargs), ('mqa_logits', 'clean_logits'),
+        t, clean_t = bench_kineto(lambda: deep_gemm.fp8_fp4_mqa_logits(**kernel_kwargs), 'fp8_fp4_mqa_logits',
                                   tensor_vars=('kernel_kwargs',),
                                   input_vars=('kernel_kwargs',), output_vars=())
         clean_bytes = (seq_len * seq_len_kv - ref_cost) * logits_dtype.itemsize + count_bytes(ks, ke)
@@ -520,7 +520,7 @@ def test_paged_mqa_logits():
         kv_sum_lens = seq_sum_lens if is_varlen else sum_lens
         total_bytes = q_weight_bytes + kv_sum_lens * kv_bytes_per_token + (sum_lens * next_n * logits_dtype.itemsize)
 
-        t, clean_t = bench_kineto(lambda: deep_gemm.fp8_fp4_paged_mqa_logits(**kernel_kwargs), ('paged_mqa_logits', 'clean_logits'),
+        t, clean_t = bench_kineto(lambda: deep_gemm.fp8_fp4_paged_mqa_logits(**kernel_kwargs), 'fp8_fp4_paged_mqa_logits',
                                   tensor_vars=('kernel_kwargs',),
                                   input_vars=('kernel_kwargs',), output_vars=())
         reduce_relus = sum_lens * next_n * num_heads

@@ -52,10 +52,12 @@ def test_sf_layout_kernels() -> None:
         x, fp32_sf = per_token_cast_to_fp8(x, use_ue8m0=use_ue8m0, gran_k=gran_k)
         fp32_sf = fp32_sf if num_groups == 1 else fp32_sf.view(num_groups, mn, -1)
         fp32_sf = fp32_sf if with_transpose else fp32_sf.transpose(-1, -2).contiguous().transpose(-1, -2)
+        algo_name : str
 
         # Correctness
         if use_ue8m0:
             impl, name = get_mn_major_tma_aligned_packed_ue8m0_tensor, 'pack_fp32_into_ue8m0'
+            algo_name = 'get_mn_major_tma_aligned_packed_ue8m0_tensor'
             if os.getenv('CORRECTNESS'):
                 print_kernel_io('get_mn_major_tma_aligned_packed_ue8m0_tensor', dict(fp32_sf=fp32_sf), {})
                 with _CudaClosureContext(lambda: impl(fp32_sf), tensor_vars=('fp32_sf',)):
@@ -67,6 +69,7 @@ def test_sf_layout_kernels() -> None:
                 assert all([packed_sf.stride(i) == ref_packed_sf.stride(i) for i in range(packed_sf.dim())])
         else:
             impl, name = get_mn_major_tma_aligned_tensor, 'transpose'
+            algo_name = 'get_mn_major_tma_aligned_tensor'
             if os.getenv('CORRECTNESS'):
                 print_kernel_io('get_mn_major_tma_aligned_tensor', dict(fp32_sf=fp32_sf), {})
                 with _CudaClosureContext(lambda: impl(fp32_sf), tensor_vars=('fp32_sf',)):
@@ -82,7 +85,7 @@ def test_sf_layout_kernels() -> None:
 
         # Performance
         try:
-            t = bench_kineto(lambda: impl(fp32_sf), name,
+            t = bench_kineto(lambda: impl(fp32_sf), algo_name,
                              tensor_vars=('fp32_sf',),
                              input_vars=('fp32_sf',), output_vars=())
         except AssertionError as e:

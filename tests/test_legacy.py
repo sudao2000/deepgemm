@@ -51,7 +51,7 @@ def test_m_grouped_gemm_contiguous_tl() -> None:
         def test_func():
             deep_gemm.legacy.m_grouped_bf16_gemm_nt_contiguous_tl(a, b, d, m_indices)
 
-        t = bench_kineto(test_func, 'm_grouped_bf16_gemm_contiguous_tl_impl',
+        t = bench_kineto(test_func, 'm_grouped_bf16_gemm_nt_contiguous_tl',
                          tensor_vars=('a', 'b', 'd', 'm_indices'),
                          input_vars=('a', 'b', 'm_indices'), output_vars=('d',), suppress_kineto_output=True)
         print(f' > Perf ({num_groups=}, m={m:5}, n={n:5}, k={k:5}, layout={major_opt}): '
@@ -94,7 +94,7 @@ def test_k_grouped_gemm_contiguous_tl() -> None:
         def test_func():
             deep_gemm.legacy.b_fused_k_grouped_bf16_gemm_tn_contiguous_tl(a, b, c, (k_indices, k_start, k_end), True)
 
-        t = bench_kineto(test_func, 'b_fused_k_grouped_bf16_gemm_contiguous_tl_impl',
+        t = bench_kineto(test_func, 'b_fused_k_grouped_bf16_gemm_tn_contiguous_tl',
                          tensor_vars=('a', 'b', 'c', 'k_indices', 'k_start', 'k_end'),
                          input_vars=('a', 'b', 'k_indices', 'k_start', 'k_end'),
                          output_vars=('c',), suppress_kineto_output=True)

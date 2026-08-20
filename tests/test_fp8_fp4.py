@@ -60,9 +60,9 @@ def test_gemm() -> None:
 
         a, b, c, d, ref_d = generate_normal(m, n, k, major_a, major_b, accumulate, out_dtype, kernel_type, use_ue8m0=use_ue8m0, quant_config=quant_config)
         t = bench_kineto(lambda: deep_gemm.fp8_fp4_gemm_nt(a, b, d, c=c, disable_ue8m0_cast=disable_ue8m0_cast, recipe=recipe, recipe_a=recipe_a, recipe_b=recipe_b),
-                         'gemm_', tensor_vars=('a', 'b', 'c', 'd'),
+                         'fp8_fp4_gemm_nt', tensor_vars=('a', 'b', 'c', 'd'),
                          input_vars=('a', 'b', 'c'), output_vars=('d',), suppress_kineto_output=True)
-        cublas_t, split_k_t = bench_kineto(lambda: deep_gemm.cublaslt_gemm_nt(a[0], b[0], d, c=c), ('nvjet', 'reduce'),
+        cublas_t, split_k_t = bench_kineto(lambda: deep_gemm.cublaslt_gemm_nt(a[0], b[0], d, c=c), 'cublaslt_gemm_nt',
                                            tensor_vars=('a', 'b', 'c', 'd'),
                                            input_vars=('a', 'b', 'c'), output_vars=('d',), suppress_kineto_output=True) \
                               if not quant_config.is_fp4_a and not quant_config.is_fp4_b else (0, 0)
@@ -138,7 +138,7 @@ def test_m_grouped_gemm_contiguous() -> None:
                                                            ensure_zero_padding=ensure_zero_padding,
                                                            recipe=recipe, recipe_a=recipe_a, recipe_b=recipe_b)
 
-        t = bench_kineto(test_func, 'gemm_',
+        t = bench_kineto(test_func, 'm_grouped_fp8_fp4_gemm_nt_contiguous',
                          tensor_vars=('a', 'b', 'd', 'grouped_layout'),
                          input_vars=('a', 'b', 'grouped_layout'), output_vars=('d',), suppress_kineto_output=True)
         print(f' > Perf ({num_groups=}, m={m:5}, n={n:6}, k={k:5}, {kernel_opt}, layout={major_opt}, '
@@ -214,7 +214,7 @@ def test_m_grouped_gemm_masked() -> None:
 
             # Test performance with fixed shapes
             valid_m = masked_m.sum().item()
-            t = bench_kineto(test_func, 'gemm_',
+            t = bench_kineto(test_func, 'm_grouped_fp8_fp4_gemm_nt_contiguous',
                              tensor_vars=('a', 'b', 'd', 'masked_m',
                                           'a_psum', 'd_psum', 'psum_m'),
                              input_vars=('a', 'b', 'masked_m', 'a_psum', 'psum_m'),
@@ -301,7 +301,7 @@ def test_k_grouped_gemm_contiguous() -> None:
         def test_func():
             k_grouped_fp8_gemm_contiguous(a, b, d, aligned_ks_cpu, grouped_layout, c, recipe=recipe, use_psum_layout=use_psum_layout)
 
-        t = bench_kineto(test_func, 'gemm_',
+        t = bench_kineto(test_func, 'k_grouped_fp8_gemm_nt_contiguous',
                          tensor_vars=('a', 'b', 'c', 'd', 'grouped_layout'),
                          input_vars=('a', 'b', 'c', 'grouped_layout'), output_vars=('d',),
                          suppress_kineto_output=True)
