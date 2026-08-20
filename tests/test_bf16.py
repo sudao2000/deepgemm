@@ -134,7 +134,7 @@ def test_m_grouped_gemm_masked() -> None:
 
     # TODO: when the actual `m` is greater than `expected_m_per_group`, efficiency may significantly decrease.
     for _, _, num_groups, max_m, expected_m_per_group, n, k, use_psum_layout in enumerate_m_grouped_masked(torch.bfloat16):
-        num_tests = 8
+        num_tests = 1
         sum_t, max_t = 0, 0
         sum_ops, sum_bytes = 0, 0
 

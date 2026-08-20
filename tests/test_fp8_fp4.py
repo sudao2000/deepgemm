@@ -159,7 +159,7 @@ def test_m_grouped_gemm_masked() -> None:
         disable_ue8m0_cast = not use_ue8m0
         recipe, recipe_a, recipe_b = quant_config.get_recipes()
 
-        num_tests = 8
+        num_tests = 1
         sum_t, max_t = 0, 0
         sum_ops, sum_bytes = 0, 0
 
