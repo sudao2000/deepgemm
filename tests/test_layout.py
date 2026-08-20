@@ -82,7 +82,9 @@ def test_sf_layout_kernels() -> None:
 
         # Performance
         try:
-            t = bench_kineto(lambda: impl(fp32_sf), name, tensor_vars=('fp32_sf',))
+            t = bench_kineto(lambda: impl(fp32_sf), name,
+                             tensor_vars=('fp32_sf',),
+                             input_vars=('fp32_sf',), output_vars=())
         except AssertionError as e:
             # Some cases may fallback to PyTorch impl
             t = 0
@@ -113,7 +115,9 @@ def test_k_grouped_sf_layout_kernels() -> None:
                 assert torch.equal(split_packed_sf[i], ref_packed_sf), f'{i=}'
 
         # Performance
-        t = bench_kineto(lambda: get_k_grouped_mn_major_tma_aligned_packed_ue8m0_tensor(fp32_sf, grouped_layout, ks_cpu, gran_k, gran_k), 'pack_fp32_into_ue8m0')
+        t = bench_kineto(lambda: get_k_grouped_mn_major_tma_aligned_packed_ue8m0_tensor(fp32_sf, grouped_layout, ks_cpu, gran_k, gran_k), 'pack_fp32_into_ue8m0',
+                         tensor_vars=('fp32_sf', 'grouped_layout', 'ks_cpu', 'gran_k'),
+                         input_vars=('fp32_sf', 'grouped_layout', 'ks_cpu', 'gran_k'), output_vars=())
         print(f' > Perf ({num_groups=:3}, {mn=:5}, sum_k={sum(ks_cpu):5}, gran_k={gran_k:3}):'
               f'{t * 1e6:4.0f} us | '
               f'{count_bytes(fp32_sf, packed_sf, grouped_layout) / 1e9 / t:4.0f} GB/s')
@@ -175,7 +179,9 @@ def test_k_grouped_psum_sf_layout_kernels() -> None:
             assert torch.equal(empty_ks_packed_sf[:ref_packed_sf.size(0)], ref_packed_sf)
 
         # Performance
-        t = bench_kineto(lambda: get_k_grouped_mn_major_tma_aligned_packed_ue8m0_tensor(fp32_sf, grouped_layout, aligned_ks_cpu, gran_k, k_alignment, use_psum_layout=True), 'pack_fp32_into_ue8m0')
+        t = bench_kineto(lambda: get_k_grouped_mn_major_tma_aligned_packed_ue8m0_tensor(fp32_sf, grouped_layout, aligned_ks_cpu, gran_k, k_alignment, use_psum_layout=True), 'pack_fp32_into_ue8m0',
+                         tensor_vars=('fp32_sf', 'grouped_layout', 'aligned_ks_cpu', 'gran_k', 'k_alignment'),
+                         input_vars=('fp32_sf', 'grouped_layout', 'aligned_ks_cpu', 'gran_k', 'k_alignment'), output_vars=())
         print(f' > Perf ({num_groups=:3}, {mn=:5}, sum_k={sum(real_ks_cpu):5}, gran_k={gran_k:3}, k_alignment={k_alignment:3}):'
               f'{t * 1e6:4.0f} us | '
               f'{count_bytes(fp32_sf, packed_sf, grouped_layout) / 1e9 / t:4.0f} GB/s')

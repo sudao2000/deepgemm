@@ -179,7 +179,9 @@ def bench_kineto(fn, kernel_names, num_tests: int = 1,
                  trace_path: str = None, flush_l2: bool = True,
                  with_multiple_kernels: bool = False,
                  barrier: Optional[Callable] = None,
-                 tensor_vars: Optional[Iterable[str]] = None):
+                 tensor_vars: Optional[Iterable[str]] = None,
+                 input_vars: Optional[Iterable[str]] = None,
+                 output_vars: Optional[Iterable[str]] = None):
     assert isinstance(kernel_names, str) or isinstance(kernel_names, tuple)
     is_tuple = isinstance(kernel_names, tuple)
 
@@ -190,6 +192,10 @@ def bench_kineto(fn, kernel_names, num_tests: int = 1,
 
     # By default, flush L2 with an excessive 8 GB memset to give the GPU some (literal) chill time without full idle
     flush_l2_size = int(8e9 // 4)
+
+    input_names = set(input_vars) if input_vars is not None else set()
+    output_names = set(output_vars) if output_vars is not None else set()
+    return_value_as_output = output_vars is not None and len(output_vars) == 0
 
     with _CudaClosureContext(fn, tensor_vars):
         # Print I/O info for the kernel being benchmarked
@@ -205,15 +211,18 @@ def bench_kineto(fn, kernel_names, num_tests: int = 1,
                     continue
                 if name == 'kernel_kwargs':
                     continue
-                if name == 'd':
+                if name in output_names:
                     io_outputs[name] = _to_cpu_for_print(name_to_cell[name].cell_contents)
                     io_output_cells[name] = name_to_cell[name]
                 else:
                     io_inputs[name] = _to_cpu_for_print(name_to_cell[name].cell_contents)
-            print_kernel_io(kernel_io_name, io_inputs, io_outputs)
 
-        # For some auto-tuning kernels with prints
-        fn()
+        if return_value_as_output:
+            io_outputs['return'] = _to_cpu_for_print(fn())
+        else:
+            fn()
+
+        print_kernel_io(kernel_io_name, io_inputs, io_outputs)
 
         # Profile
         suppress = suppress_stdout_stderr if suppress_kineto_output else empty_suppress

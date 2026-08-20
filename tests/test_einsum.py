@@ -55,7 +55,8 @@ def test_bmk_bnk_mn() -> None:
             assert calc_diff(d, ref_d) < 1e-5
 
         t = bench_kineto(lambda: deep_gemm.einsum('bmk,bnk->mn', a, b, d, c=c), 'bmn_bnk_mn_gemm_impl',
-                         tensor_vars=('a', 'b', 'd', 'c'), suppress_kineto_output=True)
+                         tensor_vars=('a', 'b', 'd', 'c'),
+                         input_vars=('a', 'b', 'c'), output_vars=('d',), suppress_kineto_output=True)
         print(f' > Perf (b={s:4.0f}, {m=}, {n=}, {k=}, {"FP32" if dtype == torch.float else "BF16"}): ',
             f'{t * 1e6:4.0f} us | '
             f'{2 * s * m * n * k / t / 1e12:4.0f} TFLOPS | '
@@ -80,9 +81,11 @@ def test_bhr_hdr_bhd():
             assert calc_diff(z, ref_z) < 1e-10
 
         t = bench_kineto(lambda: deep_gemm.einsum('bhr,hdr->bhd', x, y, z), 'gemm',
-                         tensor_vars=('x', 'y', 'z'), suppress_kineto_output=True)
+                         tensor_vars=('x', 'y', 'z'),
+                         input_vars=('x', 'y'), output_vars=('z',), suppress_kineto_output=True)
         t_cublaslt = bench_kineto(lambda: deep_gemm.einsum('bhr,hdr->bhd', x, y, z, use_cublaslt=True), 'nvjet',
-                                  tensor_vars=('x', 'y', 'z'), suppress_kineto_output=True)
+                                  tensor_vars=('x', 'y', 'z'),
+                                  input_vars=('x', 'y'), output_vars=('z',), suppress_kineto_output=True)
         print(f' > Perf ({b=:4.0f}, {h=}, {r=}, {d=}): ',
               f'{t * 1e6:4.0f} us | '
               f'{2 * b * h * r * d / t / 1e12:4.0f} TFLOPS | '
@@ -108,9 +111,11 @@ def test_bhd_hdr_bhr():
             assert calc_diff(z, ref_z) < 1e-10
 
         t = bench_kineto(lambda: deep_gemm.einsum('bhd,hdr->bhr', x, y, z), 'gemm',
-                         tensor_vars=('x', 'y', 'z'), suppress_kineto_output=True)
+                         tensor_vars=('x', 'y', 'z'),
+                         input_vars=('x', 'y'), output_vars=('z',), suppress_kineto_output=True)
         t_cublaslt = bench_kineto(lambda: deep_gemm.einsum('bhd,hdr->bhr', x, y, z, use_cublaslt=True), 'nvjet',
-                                  tensor_vars=('x', 'y', 'z'), suppress_kineto_output=True)
+                                  tensor_vars=('x', 'y', 'z'),
+                                  input_vars=('x', 'y'), output_vars=('z',), suppress_kineto_output=True)
         print(f' > Perf ({b=:4.0f}, {h=}, {r=}, {d=}): ',
               f'{t * 1e6:4.0f} us | '
               f'{2 * b * h * r * d / t / 1e12:4.0f} TFLOPS | '
@@ -143,9 +148,11 @@ def test_fp8_bhr_hdr_bhd(use_ue8m0: bool = True):
             assert calc_diff(z, ref_z) < 1e-3
 
         t = bench_kineto(lambda: deep_gemm.fp8_einsum('bhr,hdr->bhd', x_fp8, y_fp8, z), 'gemm_',
-                         tensor_vars=('x_fp8', 'y_fp8', 'z'), suppress_kineto_output=True)
+                         tensor_vars=('x_fp8', 'y_fp8', 'z'),
+                         input_vars=('x_fp8', 'y_fp8'), output_vars=('z',), suppress_kineto_output=True)
         t_cublaslt = bench_kineto(lambda: deep_gemm.einsum('bhr,hdr->bhd', x, y, z, use_cublaslt=True), 'nvjet',
-                                  tensor_vars=('x', 'y', 'z'), suppress_kineto_output=True)
+                                  tensor_vars=('x', 'y', 'z'),
+                                  input_vars=('x', 'y'), output_vars=('z',), suppress_kineto_output=True)
         print(f' > Perf ({b=:4.0f}, {h=}, {r=}, {d=}): ',
               f'{t * 1e6:4.0f} us | '
               f'{2 * b * h * r * d / t / 1e12:4.0f} TFLOPS | '
@@ -180,9 +187,11 @@ def test_fp8_bhd_hdr_bhr(use_ue8m0: bool = True):
                 assert calc_diff(z, ref_z) < 1e-3
 
             t = bench_kineto(lambda: deep_gemm.fp8_einsum('bhd,hdr->bhr', x_fp8, y_fp8, z), 'gemm_',
-                             tensor_vars=('x_fp8', 'y_fp8', 'z'), suppress_kineto_output=True)
+                             tensor_vars=('x_fp8', 'y_fp8', 'z'),
+                             input_vars=('x_fp8', 'y_fp8'), output_vars=('z',), suppress_kineto_output=True)
             t_cublaslt = bench_kineto(lambda: deep_gemm.einsum('bhd,hdr->bhr', x, y, z, use_cublaslt=True), 'nvjet',
-                                      tensor_vars=('x', 'y', 'z'), suppress_kineto_output=True)
+                                      tensor_vars=('x', 'y', 'z'),
+                                      input_vars=('x', 'y'), output_vars=('z',), suppress_kineto_output=True)
             print(f' > Perf ({b=:4.0f}, {h=}, {r=}, {d=}): ',
                   f'{t * 1e6:4.0f} us | '
                   f'{2 * b * h * r * d / t / 1e12:4.0f} TFLOPS | '
@@ -215,7 +224,8 @@ def test_fp8_bhd_bhr_hdr(use_ue8m0: bool = True):
                 assert calc_diff(z, ref_z) < 1e-3
 
             t = bench_kineto(lambda: deep_gemm.fp8_einsum('bhd,bhr->hdr', x_fp8, y_fp8, z, z, recipe=(1, 1, 128)), 'gemm_',
-                             tensor_vars=('x_fp8', 'y_fp8', 'z'), suppress_kineto_output=True)
+                             tensor_vars=('x_fp8', 'y_fp8', 'z'),
+                             input_vars=('x_fp8', 'y_fp8', 'z'), output_vars=('z',), suppress_kineto_output=True)
             print(f' > Perf ({b=:4.0f}, {h=}, {r=}, {d=}): ',
                   f'{t * 1e6:4.0f} us | '
                   f'{2 * b * h * r * d / t / 1e12:4.0f} TFLOPS | '

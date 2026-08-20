@@ -339,7 +339,8 @@ def test(local_rank: int, num_local_ranks: int, args: argparse.Namespace):
     # Benchmark
     barrier_fn = lambda: ep_buffer.barrier(use_comm_stream=False) if ep_buffer else dist.all_reduce(torch.empty(1, device='cuda'))
     trace_path = None if not args.dump_profile_traces else f'{args.dump_profile_traces}/mega_moe_rank{rank_idx}.json'
-    t_fused = bench_kineto(run_fused, 'mega_moe', barrier=barrier_fn, trace_path=trace_path)
+    t_fused = bench_kineto(run_fused, 'mega_moe', tensor_vars=(),
+                           input_vars=(), output_vars=(), barrier=barrier_fn, trace_path=trace_path)
     t_baseline = tilelang_bench(
         run_baseline, _n_warmup=5, _n_repeat=1,
         backend='cudagraph', return_mode='median') / 1e3 if is_legacy_loaded else 0
