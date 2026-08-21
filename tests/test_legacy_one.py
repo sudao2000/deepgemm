@@ -31,7 +31,19 @@ SUITES = {
     'test_k_grouped_gemm_contiguous_tl': ('enumerate_k_grouped_contiguous', test_legacy.test_k_grouped_gemm_contiguous_tl),
 }
 
+def get_expand_alias(index: int) -> tuple[bool, bool]:
+    mapping = [
+        (True, True),    # index % 4 == 0
+        (True, False),   # index % 4 == 1
+        (False, True),   # index % 4 == 2
+        (False, False)   # index % 4 == 3
+    ]
+    return mapping[index % 4]
 
+def map_index_to_operand(index) -> str:
+    operands = ('a', 'b')
+    return operands[index % 2]
+    
 def main() -> None:
     args = sys.argv[1:]
     if not args or args[0] not in SUITES:
@@ -61,7 +73,8 @@ def main() -> None:
     setattr(test_legacy, enum_name, lambda *a, **kw: iter(selected))
     for i, case in zip(indices, selected):
         print(f'[test_legacy {name} #{i}] {case}')
-    test_fn()
+    expand, alias = get_expand_alias(int(args[1]))
+    test_fn(expand, alias)
     print()
 
 
