@@ -46,5 +46,8 @@ PYTHONPATH=. python tests/test_layout_one.py test_k_grouped_psum_sf_layout_kerne
 
 PYTHONPATH=. python tests/test_legacy_one.py test_m_grouped_gemm_contiguous_tl 0
 PYTHONPATH=. python tests/test_legacy_one.py test_m_grouped_gemm_contiguous_tl 1
+PYTHONPATH=. python tests/test_legacy_one.py test_m_grouped_gemm_contiguous_tl 2
+PYTHONPATH=. python tests/test_legacy_one.py test_m_grouped_gemm_contiguous_tl 3
 PYTHONPATH=. python tests/test_legacy_one.py test_k_grouped_gemm_contiguous_tl 0
 PYTHONPATH=. python tests/test_legacy_one.py test_k_grouped_gemm_contiguous_tl 1
+

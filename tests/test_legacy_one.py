@@ -26,11 +26,6 @@ import torch
 
 import test_legacy
 
-SUITES = {
-    'test_m_grouped_gemm_contiguous_tl': ('enumerate_m_grouped_contiguous', test_legacy.test_m_grouped_gemm_contiguous_tl),
-    'test_k_grouped_gemm_contiguous_tl': ('enumerate_k_grouped_contiguous', test_legacy.test_k_grouped_gemm_contiguous_tl),
-}
-
 def get_expand_alias(index: int) -> tuple[bool, bool]:
     mapping = [
         (True, True),    # index % 4 == 0
@@ -43,7 +38,12 @@ def get_expand_alias(index: int) -> tuple[bool, bool]:
 def map_index_to_operand(index) -> str:
     operands = ('a', 'b')
     return operands[index % 2]
-    
+
+SUITES = {
+    'test_m_grouped_gemm_contiguous_tl': ('enumerate_m_grouped_contiguous', test_legacy.test_m_grouped_gemm_contiguous_tl, get_expand_alias),
+    'test_k_grouped_gemm_contiguous_tl': ('enumerate_k_grouped_contiguous', test_legacy.test_k_grouped_gemm_contiguous_tl, map_index_to_operand),
+}
+   
 def main() -> None:
     args = sys.argv[1:]
     if not args or args[0] not in SUITES:
@@ -51,7 +51,7 @@ def main() -> None:
         return
 
     name = args[0]
-    enum_name, test_fn = SUITES[name]
+    enum_name, test_fn, mapping_fn = SUITES[name]
     cases = list(getattr(test_legacy, enum_name)(torch.bfloat16))
 
     # No case index given: list all cases
@@ -73,8 +73,7 @@ def main() -> None:
     setattr(test_legacy, enum_name, lambda *a, **kw: iter(selected))
     for i, case in zip(indices, selected):
         print(f'[test_legacy {name} #{i}] {case}')
-    expand, alias = get_expand_alias(int(args[1]))
-    test_fn(expand, alias)
+    test_fn(mapping_fn(int(args[1])))
     print()
 
 
