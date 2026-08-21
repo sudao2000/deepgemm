@@ -54,23 +54,26 @@ def test_gemm_skip_head_mid() -> None:
         d = apply_skip_head_mid(d, head_splits)
         ref_d = apply_skip_head_mid(ref_d, head_splits)
 
-        if os.getenv('CORRECTNESS'):
-            print_kernel_io('fp8_gemm_nt_skip_head_mid',
-                            dict(a=a, b=b, d=d, head_splits=head_splits, disable_ue8m0_cast=disable_ue8m0_cast), {})
-            a, b, d, ref_d = to_device((a, b, d, ref_d), 'cuda')
-            deep_gemm.fp8_gemm_nt_skip_head_mid(a, b, d, head_splits, disable_ue8m0_cast=disable_ue8m0_cast)
-            a, b, d, ref_d = to_device((a, b, d, ref_d), 'cpu')
-            print_kernel_io('fp8_gemm_nt_skip_head_mid', {}, dict(d=d))
-            diff = calc_diff(d, ref_d)
-            assert diff < 0.001, f'{m=}, {n=}, {k=}, {kernel_opt}, {diff:.5f}'
+        print_kernel_io('fp8_gemm_nt_skip_head_mid',
+                        dict(a=a, b=b, d=d, head_splits=head_splits, disable_ue8m0_cast=disable_ue8m0_cast), {})
+        a, b, d, ref_d = to_device((a, b, d, ref_d), 'cuda')
+        deep_gemm.fp8_gemm_nt_skip_head_mid(a, b, d, head_splits, disable_ue8m0_cast=disable_ue8m0_cast)
+        a, b, d, ref_d = to_device((a, b, d, ref_d), 'cpu')
+        print_kernel_io('fp8_gemm_nt_skip_head_mid', {}, dict(d=d))
+        diff = calc_diff(d, ref_d)
+        assert diff < 0.001, f'{m=}, {n=}, {k=}, {kernel_opt}, {diff:.5f}'
 
-        t = bench_kineto(lambda: deep_gemm.fp8_gemm_nt_skip_head_mid(a, b, d, head_splits, disable_ue8m0_cast=disable_ue8m0_cast),
-                         'fp8_gemm_nt_skip_head_mid', tensor_vars=('a', 'b', 'd'),
-                         input_vars=('a', 'b'), output_vars=('d',), suppress_kineto_output=True)
-        print(f' > Perf (m={m:5}, n={n:5}, k={k:5}, {kernel_opt}): '
-              f'{t * 1e6:4.0f} us | '
-              f'{2 * m * n * k / t / 1e12:4.0f} TFLOPS | '
-              f'{(count_bytes(a, b, d)) / 1e9 / t:4.0f} GB/s')
+        if os.getenv('PERFORMANCE'):
+            t = bench_kineto(lambda: deep_gemm.fp8_gemm_nt_skip_head_mid(a, b, d, head_splits, disable_ue8m0_cast=disable_ue8m0_cast),
+                            'gemm_', tensor_vars=('a', 'b', 'd'),
+                            input_vars=('a', 'b'), output_vars=('d',), suppress_kineto_output=True)
+            if t > 0:
+                print(f' > Perf (m={m:5}, n={n:5}, k={k:5}, {kernel_opt}): '
+                    f'{t * 1e6:4.0f} us | '
+                    f'{2 * m * n * k / t / 1e12:4.0f} TFLOPS | '
+                    f'{(count_bytes(a, b, d)) / 1e9 / t:4.0f} GB/s')
+            else:
+                print(f' > Perf (m={m:5}, n={n:5}, k={k:5}, {kernel_opt}): timing unavailable')
     print()
 
 
@@ -230,59 +233,61 @@ def test_mqa_logits():
             max_seqlen_k = (ke - ks).max().item()
             kernel_kwargs['max_seqlen_k'] = max_seqlen_k
 
-        if os.getenv('CORRECTNESS'):
-            # Run kernel on CUDA, then bring the result back to CPU
-            print_kernel_io('fp8_fp4_mqa_logits', kernel_kwargs, {})
-            logits = _call_kernel_on_cuda(deep_gemm.fp8_fp4_mqa_logits, kernel_kwargs)
-            print_kernel_io('fp8_fp4_mqa_logits', {}, dict(logits=logits))
+        print_kernel_io('fp8_fp4_mqa_logits', kernel_kwargs, {})
+        logits = _call_kernel_on_cuda(deep_gemm.fp8_fp4_mqa_logits, kernel_kwargs)
+        print_kernel_io('fp8_fp4_mqa_logits', {}, dict(logits=logits))
 
+        if compressed_logits:
+            self_mask = torch.arange(logits.size(1), device=logits.device)[None, :] < (ke - ks)[:, None]
+            masked_logits = logits.masked_fill(~self_mask, 0)
+        else:
+            masked_logits = logits
+        for _ in range(20):
+            logits_again = _call_kernel_on_cuda(deep_gemm.fp8_fp4_mqa_logits, kernel_kwargs)
             if compressed_logits:
-                self_mask = torch.arange(logits.size(1), device=logits.device)[None, :] < (ke - ks)[:, None]
-                masked_logits = logits.masked_fill(~self_mask, 0)
+                logits_again = logits_again.masked_fill(~self_mask, 0)
+            assert_bitwise_equal(logits_again, masked_logits, 'mqa logits self-consistency')
+
+        # Post process for compressed logits
+        if compressed_logits:
+            assert logits.size() == (seq_len, max_seqlen_k)
+            tmp = torch.full((seq_len, seq_len_kv), float('-inf'), device=logits.device)
+            for i in range(seq_len):
+                tmp[i, ks[i] : ke[i]] = logits[i, : ke[i] - ks[i]]
+            logits = tmp
+
+        # Validation
+        ref_neginf_mask = (ref_logits == float('-inf'))
+        neginf_mask = (logits == float('-inf'))
+        assert torch.equal(neginf_mask, ref_neginf_mask)
+
+        ref_logits = ref_logits.masked_fill(ref_neginf_mask, 0)
+        simulated_logits = simulated_logits.masked_fill(ref_neginf_mask, 0)
+        logits = logits.masked_fill(ref_neginf_mask, 0)
+        diff = calc_diff(logits, ref_logits)
+        simulated_diff = calc_diff(logits, simulated_logits)
+        assert diff < (0.02 if (is_mxfp4 or is_mxfp8) else 1e-3), f"Diff: {diff}"
+        assert simulated_diff < ref_diff_tol(weights_dtype == torch.bfloat16 or logits_dtype == torch.bfloat16), f"Simulated Diff: {simulated_diff}"
+
+        if os.getenv('PERFORMANCE'):
+            tflops = 2 * ref_cost * num_heads * head_dim / 1e12
+            t, clean_t = bench_kineto(lambda: deep_gemm.fp8_fp4_mqa_logits(**kernel_kwargs), ('mqa_logits', 'clean_logits'),
+                                    tensor_vars=('kernel_kwargs',),
+                                    input_vars=('kernel_kwargs',), output_vars=())
+            clean_bytes = (seq_len * seq_len_kv - ref_cost) * logits_dtype.itemsize + count_bytes(ks, ke)
+
+            if t > 0:
+                reduce_relus = ref_cost * num_heads
+                relu_per_sm_cycle = reduce_relus / (t * deep_gemm.get_num_sms() * 1.95 * 1e9)
+                print(f' > Fmt={fmt:5}, Logits={dtype_tag(logits_dtype):4}, Reduce={dtype_tag(weights_dtype):4}, '
+                    f'CMP={int(compressed_logits):1d}, SQ={seq_len:4}, SK={seq_len_kv:5}, H={num_heads:2}, D={head_dim:3}, CP={0 if disable_cp else 1}: '
+                    f'{tflops / t:4.0f} TFLOPS, {t * 1e6:4.0f} us, '
+                    f'{(count_bytes(q_in, kv_in, kernel_weights, ks, ke) + ref_cost * logits_dtype.itemsize) / t / 1e9:4.0f} GB/s, '
+                    f'{relu_per_sm_cycle:4.1f} relu/cyc/SM', end='')
+                print(f' | clean: {clean_t * 1e6:3.0f} us, {clean_bytes / clean_t / 1e9:4.0f} GB/s' if clean_logits else '')
             else:
-                masked_logits = logits
-            for _ in range(20):
-                logits_again = _call_kernel_on_cuda(deep_gemm.fp8_fp4_mqa_logits, kernel_kwargs)
-                if compressed_logits:
-                    logits_again = logits_again.masked_fill(~self_mask, 0)
-                assert_bitwise_equal(logits_again, masked_logits, 'mqa logits self-consistency')
-
-            # Post process for compressed logits
-            if compressed_logits:
-                assert logits.size() == (seq_len, max_seqlen_k)
-                tmp = torch.full((seq_len, seq_len_kv), float('-inf'), device=logits.device)
-                for i in range(seq_len):
-                    tmp[i, ks[i] : ke[i]] = logits[i, : ke[i] - ks[i]]
-                logits = tmp
-
-            # Validation
-            ref_neginf_mask = (ref_logits == float('-inf'))
-            neginf_mask = (logits == float('-inf'))
-            assert torch.equal(neginf_mask, ref_neginf_mask)
-
-            ref_logits = ref_logits.masked_fill(ref_neginf_mask, 0)
-            simulated_logits = simulated_logits.masked_fill(ref_neginf_mask, 0)
-            logits = logits.masked_fill(ref_neginf_mask, 0)
-            diff = calc_diff(logits, ref_logits)
-            simulated_diff = calc_diff(logits, simulated_logits)
-            assert diff < (0.02 if (is_mxfp4 or is_mxfp8) else 1e-3), f"Diff: {diff}"
-            assert simulated_diff < ref_diff_tol(weights_dtype == torch.bfloat16 or logits_dtype == torch.bfloat16), f"Simulated Diff: {simulated_diff}"
-
-        # Profiling: bench_kineto moves the captured kernel_kwargs to CUDA only while running the lambda
-        tflops = 2 * ref_cost * num_heads * head_dim / 1e12
-        t, clean_t = bench_kineto(lambda: deep_gemm.fp8_fp4_mqa_logits(**kernel_kwargs), 'fp8_fp4_mqa_logits',
-                                  tensor_vars=('kernel_kwargs',),
-                                  input_vars=('kernel_kwargs',), output_vars=())
-        clean_bytes = (seq_len * seq_len_kv - ref_cost) * logits_dtype.itemsize + count_bytes(ks, ke)
-
-        reduce_relus = ref_cost * num_heads
-        relu_per_sm_cycle = reduce_relus / (t * deep_gemm.get_num_sms() * 1.95 * 1e9)
-        print(f' > Fmt={fmt:5}, Logits={dtype_tag(logits_dtype):4}, Reduce={dtype_tag(weights_dtype):4}, '
-              f'CMP={int(compressed_logits):1d}, SQ={seq_len:4}, SK={seq_len_kv:5}, H={num_heads:2}, D={head_dim:3}, CP={0 if disable_cp else 1}: '
-              f'{tflops / t:4.0f} TFLOPS, {t * 1e6:4.0f} us, '
-              f'{(count_bytes(q_in, kv_in, kernel_weights, ks, ke) + ref_cost * logits_dtype.itemsize) / t / 1e9:4.0f} GB/s, '
-              f'{relu_per_sm_cycle:4.1f} relu/cyc/SM', end='')
-        print(f' | clean: {clean_t * 1e6:3.0f} us, {clean_bytes / clean_t / 1e9:4.0f} GB/s' if clean_logits else '')
+                print(f' > Fmt={fmt:5}, Logits={dtype_tag(logits_dtype):4}, Reduce={dtype_tag(weights_dtype):4}, '
+                    f'CMP={int(compressed_logits):1d}, SQ={seq_len:4}, SK={seq_len_kv:5}, H={num_heads:2}, D={head_dim:3}, CP={0 if disable_cp else 1}: timing unavailable')
     print()
 
 
@@ -486,58 +491,63 @@ def test_paged_mqa_logits():
             indices=indices,
         )
 
-        if os.getenv('CORRECTNESS'):
-            print_kernel_io('fp8_fp4_paged_mqa_logits', kernel_kwargs, {})
-            logits = _call_kernel_on_cuda(deep_gemm.fp8_fp4_paged_mqa_logits, kernel_kwargs)
-            print_kernel_io('fp8_fp4_paged_mqa_logits', {}, dict(logits=logits))
+        print_kernel_io('fp8_fp4_paged_mqa_logits', kernel_kwargs, {})
+        logits = _call_kernel_on_cuda(deep_gemm.fp8_fp4_paged_mqa_logits, kernel_kwargs)
+        print_kernel_io('fp8_fp4_paged_mqa_logits', {}, dict(logits=logits))
 
-            self_mask = ~ref_neginf_mask
-            masked_logits = logits.masked_fill(~self_mask, 0)
-            for _ in range(20):
-                logits_again = _call_kernel_on_cuda(deep_gemm.fp8_fp4_paged_mqa_logits, kernel_kwargs).masked_fill(~self_mask, 0)
-                assert_bitwise_equal(logits_again, masked_logits, 'paged mqa logits self-consistency')
+        self_mask = ~ref_neginf_mask
+        masked_logits = logits.masked_fill(~self_mask, 0)
+        for _ in range(20):
+            logits_again = _call_kernel_on_cuda(deep_gemm.fp8_fp4_paged_mqa_logits, kernel_kwargs).masked_fill(~self_mask, 0)
+            assert_bitwise_equal(logits_again, masked_logits, 'paged mqa logits self-consistency')
 
-            # Validation
-            assert logits.dtype == logits_dtype
-            logits = logits.to(torch.float)
+        # Validation
+        assert logits.dtype == logits_dtype
+        logits = logits.to(torch.float)
 
-            if clean_logits:
-                assert torch.equal(logits == float('-inf'), ref_neginf_mask), "Mask mismatch"
+        if clean_logits:
+            assert torch.equal(logits == float('-inf'), ref_neginf_mask), "Mask mismatch"
 
-            logits_masked = logits.masked_fill(ref_neginf_mask, 0)
-            ref_masked = ref_logits.masked_fill(ref_neginf_mask, 0)
-            simulated_masked = simulated_logits.masked_fill(ref_neginf_mask, 0)
-            diff = calc_diff(logits_masked, ref_masked)
-            simulated_diff = calc_diff(logits_masked, simulated_masked)
-            assert diff < (0.02 if (is_mxfp4 or is_mxfp8) else 1e-3), f"Diff: {diff}"
-            assert simulated_diff < ref_diff_tol(weights_dtype == torch.bfloat16 or logits_dtype == torch.bfloat16), f"Simulated Diff: {simulated_diff}"
+        logits_masked = logits.masked_fill(ref_neginf_mask, 0)
+        ref_masked = ref_logits.masked_fill(ref_neginf_mask, 0)
+        simulated_masked = simulated_logits.masked_fill(ref_neginf_mask, 0)
+        diff = calc_diff(logits_masked, ref_masked)
+        simulated_diff = calc_diff(logits_masked, simulated_masked)
+        assert diff < (0.02 if (is_mxfp4 or is_mxfp8) else 1e-3), f"Diff: {diff}"
+        assert simulated_diff < ref_diff_tol(weights_dtype == torch.bfloat16 or logits_dtype == torch.bfloat16), f"Simulated Diff: {simulated_diff}"
 
         # Profiling
-        sum_lens = context_lens.sum().item()
-        tflops_calc = 2 * sum_lens * next_n * num_heads * head_dim / 1e12
-        kv_bytes_per_token = head_dim / (2 if is_mxfp4 else 1) + 4
-        # KV is read once per sequence; for varlen sum_lens overcounts (per-token), so use seq_sum_lens
-        kv_sum_lens = seq_sum_lens if is_varlen else sum_lens
-        total_bytes = q_weight_bytes + kv_sum_lens * kv_bytes_per_token + (sum_lens * next_n * logits_dtype.itemsize)
+        if os.getenv('PERFORMANCE'):
+            sum_lens = context_lens.sum().item()
+            tflops_calc = 2 * sum_lens * next_n * num_heads * head_dim / 1e12
+            kv_bytes_per_token = head_dim / (2 if is_mxfp4 else 1) + 4
+            # KV is read once per sequence; for varlen sum_lens overcounts (per-token), so use seq_sum_lens
+            kv_sum_lens = seq_sum_lens if is_varlen else sum_lens
+            total_bytes = q_weight_bytes + kv_sum_lens * kv_bytes_per_token + (sum_lens * next_n * logits_dtype.itemsize)
 
-        t, clean_t = bench_kineto(lambda: deep_gemm.fp8_fp4_paged_mqa_logits(**kernel_kwargs), 'fp8_fp4_paged_mqa_logits',
-                                  tensor_vars=('kernel_kwargs',),
-                                  input_vars=('kernel_kwargs',), output_vars=())
-        reduce_relus = sum_lens * next_n * num_heads
-        relu_per_sm_cycle = reduce_relus / (t * deep_gemm.get_num_sms() * 1.95 * 1e9)
-        next_n_desc = f'MaxTPR={max_tokens_per_batch:2}' if is_varlen else f'NextN ={raw_next_n:2}'
-        print(f' > Fmt={fmt:5}, Logits={dtype_tag(logits_dtype):4}, Reduce={dtype_tag(weights_dtype):4}, '
-              f'VAR={int(is_varlen):1d}, PAGE_KV={block_kv:2}, BSZ={raw_batch_size:4}, {next_n_desc}, H={num_heads:2}, D={head_dim:3}, L={avg_kv:5}: '
-              f'{tflops_calc / t:4.0f} TFLOPS, {t * 1e6:4.0f} us, {total_bytes / t / 1e9:4.0f} GB/s, {relu_per_sm_cycle:4.1f} relu/cyc/SM', end='')
-        print(f' | clean: {clean_t*1e6:3.0f} us' if clean_logits else '')
+            t, clean_t = bench_kineto(lambda: deep_gemm.fp8_fp4_paged_mqa_logits(**kernel_kwargs), ('paged_mqa_logits', 'clean_logits'),
+                                    tensor_vars=('kernel_kwargs',),
+                                    input_vars=('kernel_kwargs',), output_vars=())
+            if t > 0:
+                reduce_relus = sum_lens * next_n * num_heads
+                relu_per_sm_cycle = reduce_relus / (t * deep_gemm.get_num_sms() * 1.95 * 1e9)
+                next_n_desc = f'MaxTPR={max_tokens_per_batch:2}' if is_varlen else f'NextN ={raw_next_n:2}'
+                print(f' > Fmt={fmt:5}, Logits={dtype_tag(logits_dtype):4}, Reduce={dtype_tag(weights_dtype):4}, '
+                    f'VAR={int(is_varlen):1d}, PAGE_KV={block_kv:2}, BSZ={raw_batch_size:4}, {next_n_desc}, H={num_heads:2}, D={head_dim:3}, L={avg_kv:5}: '
+                    f'{tflops_calc / t:4.0f} TFLOPS, {t * 1e6:4.0f} us, {total_bytes / t / 1e9:4.0f} GB/s, {relu_per_sm_cycle:4.1f} relu/cyc/SM', end='')
+                print(f' | clean: {clean_t*1e6:3.0f} us' if clean_logits else '')
+            else:
+                print(f' > Fmt={fmt:5}, Logits={dtype_tag(logits_dtype):4}, Reduce={dtype_tag(weights_dtype):4}, '
+                    f'VAR={int(is_varlen):1d}, PAGE_KV={block_kv:2}, BSZ={raw_batch_size:4}, '
+                    f'H={num_heads:2}, D={head_dim:3}, L={avg_kv:5}: timing unavailable')
 
-        del kernel_kwargs, logits, ref_neginf_mask, positions
-        del q_in, q_simulated, kv_in, kv_simulated, weights, kernel_weights, context_lens, context_lens_nextn, block_table
-        if is_mxfp4 or is_mxfp8:
-            del q_q
-        if is_varlen:
-            del tokens_per_seq, indices, offsets_within_seq
-        torch.cuda.empty_cache()
+            del kernel_kwargs, logits, ref_neginf_mask, positions
+            del q_in, q_simulated, kv_in, kv_simulated, weights, kernel_weights, context_lens, context_lens_nextn, block_table
+            if is_mxfp4 or is_mxfp8:
+                del q_q
+            if is_varlen:
+                del tokens_per_seq, indices, offsets_within_seq
+            torch.cuda.empty_cache()
     print()
 
 

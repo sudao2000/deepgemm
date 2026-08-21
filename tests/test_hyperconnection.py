@@ -10,7 +10,7 @@ from deep_gemm.testing import (
     calc_diff, count_bytes
 )
 from deep_gemm.utils import align
-from generators import get_arch_major, print_kernel_io
+from generators import get_arch_major, print_kernel_io, to_device
 from deep_gemm.testing.bench import _CudaClosureContext
 
 
@@ -35,28 +35,30 @@ def test_hc_prenorm_gemm() -> None:
                 torch.empty((num_splits, m, n), dtype=torch.float, device='cpu')
         s = torch.empty((m, ), dtype=torch.float, device='cpu') if num_splits is None else \
                 torch.empty((num_splits, m), dtype=torch.float, device='cpu')
-        if os.getenv('CORRECTNESS'):
-            print_kernel_io('tf32_hc_prenorm_gemm', dict(a=a, b=b, num_splits=num_splits), dict(d=d, s=s))
-            with _CudaClosureContext(lambda: deep_gemm.tf32_hc_prenorm_gemm(a, b, d, s, num_splits=num_splits),
-                                     tensor_vars=('a', 'b', 'd', 's')):
-                deep_gemm.tf32_hc_prenorm_gemm(a, b, d, s, num_splits=num_splits)
-            print_kernel_io('tf32_hc_prenorm_gemm', {}, dict(d=d, s=s))
-            final_d = d if num_splits is None else d.sum(0)
-            final_s = s if num_splits is None else s.sum(0)
 
-            ref_d = a.float() @ b.T
-            ref_s = a.float().square().sum(-1)
+        print_kernel_io('tf32_hc_prenorm_gemm', dict(a=a, b=b, num_splits=num_splits), dict(d=d, s=s))
+        with _CudaClosureContext(lambda: deep_gemm.tf32_hc_prenorm_gemm(a, b, d, s, num_splits=num_splits),
+                                    tensor_vars=('a', 'b', 'd', 's')):
+            deep_gemm.tf32_hc_prenorm_gemm(a, b, d, s, num_splits=num_splits)
+        print_kernel_io('tf32_hc_prenorm_gemm', {}, dict(d=d, s=s))
+        final_d = d if num_splits is None else d.sum(0)
+        final_s = s if num_splits is None else s.sum(0)
 
-            diff = max(calc_diff(final_d, ref_d), calc_diff(final_s, ref_s))
-            assert diff < 1e-8, f'{m=}, {n=}, {k=}, {diff:.10f}'
+        ref_d = a.float() @ b.T
+        ref_s = a.float().square().sum(-1)
 
-        t = bench_kineto(lambda: deep_gemm.tf32_hc_prenorm_gemm(a, b, d, s, num_splits=num_splits), 'tf32_hc_prenorm_gemm',
-                         tensor_vars=('a', 'b', 'd', 's'),
-                         input_vars=('a', 'b'), output_vars=('d', 's'), suppress_kineto_output=True)
-        print(f' > Perf (m={m:5}, n={n:5}, k={k:5}, num_splits={(num_splits or 0):2}): '
-              f'{t * 1e6:4.0f} us | '
-              f'{2 * m * n * k / t / 1e12:4.0f} TFLOPS | '
-              f'{count_bytes(a, b, d, s) / 1e9 / t:4.0f} GB/s')
+        diff = max(calc_diff(final_d, ref_d), calc_diff(final_s, ref_s))
+        assert diff < 1e-8, f'{m=}, {n=}, {k=}, {diff:.10f}'
+
+        if os.getenv('PERFORMANCE'):
+            (a, b, d, s) = to_device((a, b, d, s), 'cuda')
+            t = bench_kineto(lambda: deep_gemm.tf32_hc_prenorm_gemm(a, b, d, s, num_splits=num_splits), 'tf32_hc_prenorm_gemm',
+                            tensor_vars=('a', 'b', 'd', 's'),
+                            input_vars=('a', 'b'), output_vars=('d', 's'), suppress_kineto_output=True)
+            print(f' > Perf (m={m:5}, n={n:5}, k={k:5}, num_splits={(num_splits or 0):2}): '
+                f'{t * 1e6:4.0f} us | '
+                f'{2 * m * n * k / t / 1e12:4.0f} TFLOPS | '
+                f'{count_bytes(a, b, d, s) / 1e9 / t:4.0f} GB/s')
     print()
 
 

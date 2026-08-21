@@ -50,7 +50,7 @@ def _fmt_param(v):
 
 
 def print_kernel_io(kernel_name: str, inputs: dict, outputs: dict):
-    if os.getenv('CORRECTNESS'):
+    if os.getenv('PERFORMANCE'):
         if inputs:
             print(f' {kernel_name} inputs:')
             for name, value in inputs.items():

@@ -46,21 +46,23 @@ def test_bmk_bnk_mn() -> None:
 
         # Test correctness
         ref_d = (c if dtype == torch.float else 0) + torch.bmm(a.float(), b.float().mT).sum(0)
-        if os.getenv('CORRECTNESS'):
-            print_kernel_io('einsum', dict(equation='bmk,bnk->mn', a=a, b=b, c=c), dict(d=d))
-            with _CudaClosureContext(lambda: deep_gemm.einsum('bmk,bnk->mn', a, b, d, c=c),
-                                     tensor_vars=('a', 'b', 'd', 'c')):
-                deep_gemm.einsum('bmk,bnk->mn', a, b, d, c=c)
-            print_kernel_io('einsum', {}, dict(d=d))
-            assert calc_diff(d, ref_d) < 1e-5
 
-        t = bench_kineto(lambda: deep_gemm.einsum('bmk,bnk->mn', a, b, d, c=c), 'einsum',
-                         tensor_vars=('a', 'b', 'd', 'c'),
-                         input_vars=('a', 'b', 'c'), output_vars=('d',), suppress_kineto_output=True)
-        print(f' > Perf (b={s:4.0f}, {m=}, {n=}, {k=}, {"FP32" if dtype == torch.float else "BF16"}): ',
-            f'{t * 1e6:4.0f} us | '
-            f'{2 * s * m * n * k / t / 1e12:4.0f} TFLOPS | '
-            f'{(count_bytes(a, b) + (d.numel() * 4)) / 1e9 / t:4.0f} GB/s')
+        print_kernel_io('einsum', dict(equation='bmk,bnk->mn', a=a, b=b, c=c), dict(d=d))
+        with _CudaClosureContext(lambda: deep_gemm.einsum('bmk,bnk->mn', a, b, d, c=c),
+                                    tensor_vars=('a', 'b', 'd', 'c')):
+            deep_gemm.einsum('bmk,bnk->mn', a, b, d, c=c)
+        print_kernel_io('einsum', {}, dict(d=d))
+        assert calc_diff(d, ref_d) < 1e-5
+
+        if os.getenv('PERFORMANCE'):
+            (a, b, c, d) = to_device((a, b, c, d), 'cuda')
+            t = bench_kineto(lambda: deep_gemm.einsum('bmk,bnk->mn', a, b, d, c=c), 'bmn_bnk_mn_gemm_impl',
+                            tensor_vars=('a', 'b', 'd', 'c'),
+                            input_vars=('a', 'b', 'c'), output_vars=('d',), suppress_kineto_output=True)
+            print(f' > Perf (b={s:4.0f}, {m=}, {n=}, {k=}, {"FP32" if dtype == torch.float else "BF16"}): ',
+                f'{t * 1e6:4.0f} us | '
+                f'{2 * s * m * n * k / t / 1e12:4.0f} TFLOPS | '
+                f'{(count_bytes(a, b) + (d.numel() * 4)) / 1e9 / t:4.0f} GB/s')
     print()
 
 
@@ -72,25 +74,27 @@ def test_bhr_hdr_bhd():
         y = fy[:, :, :r]
         ref_z = torch.einsum('bhr,hdr->bhd', x, y)
         z = torch.empty((b, h, d), device='cpu', dtype=torch.bfloat16)
-        if os.getenv('CORRECTNESS'):
-            print_kernel_io('einsum', dict(equation='bhr,hdr->bhd', a=x, b=y), dict(z=z))
-            with _CudaClosureContext(lambda: deep_gemm.einsum('bhr,hdr->bhd', x, y, z),
-                                     tensor_vars=('x', 'y', 'z')):
-                deep_gemm.einsum('bhr,hdr->bhd', x, y, z)
-            print_kernel_io('einsum', {}, dict(z=z))
-            assert calc_diff(z, ref_z) < 1e-10
 
-        t = bench_kineto(lambda: deep_gemm.einsum('bhr,hdr->bhd', x, y, z), 'einsum',
-                         tensor_vars=('x', 'y', 'z'),
-                         input_vars=('x', 'y'), output_vars=('z',), suppress_kineto_output=True)
-        t_cublaslt = bench_kineto(lambda: deep_gemm.einsum('bhr,hdr->bhd', x, y, z, use_cublaslt=True), 'einsum',
-                                  tensor_vars=('x', 'y', 'z'),
-                                  input_vars=('x', 'y'), output_vars=('z',), suppress_kineto_output=True)
-        print(f' > Perf ({b=:4.0f}, {h=}, {r=}, {d=}): ',
-              f'{t * 1e6:4.0f} us | '
-              f'{2 * b * h * r * d / t / 1e12:4.0f} TFLOPS | '
-              f'{count_bytes((x, y, z)) / t / 1e9:4.0f} GB/s | '
-              f'{t_cublaslt / t:4.2f} x')
+        print_kernel_io('einsum', dict(equation='bhr,hdr->bhd', a=x, b=y), dict(z=z))
+        with _CudaClosureContext(lambda: deep_gemm.einsum('bhr,hdr->bhd', x, y, z),
+                                    tensor_vars=('x', 'y', 'z')):
+            deep_gemm.einsum('bhr,hdr->bhd', x, y, z)
+        print_kernel_io('einsum', {}, dict(z=z))
+        assert calc_diff(z, ref_z) < 1e-10
+
+        if os.getenv('PERFORMANCE'):
+            (x, y, z) = to_device((x, y, z), 'cuda')
+            t = bench_kineto(lambda: deep_gemm.einsum('bhr,hdr->bhd', x, y, z), 'gemm',
+                            tensor_vars=('x', 'y', 'z'),
+                            input_vars=('x', 'y'), output_vars=('z',), suppress_kineto_output=True)
+            t_cublaslt = bench_kineto(lambda: deep_gemm.einsum('bhr,hdr->bhd', x, y, z, use_cublaslt=True), 'nvjet',
+                                    tensor_vars=('x', 'y', 'z'),
+                                    input_vars=('x', 'y'), output_vars=('z',), suppress_kineto_output=True)
+            print(f' > Perf ({b=:4.0f}, {h=}, {r=}, {d=}): ',
+                f'{t * 1e6:4.0f} us | '
+                f'{2 * b * h * r * d / t / 1e12:4.0f} TFLOPS | '
+                f'{count_bytes((x, y, z)) / t / 1e9:4.0f} GB/s | '
+                f'{t_cublaslt / t:4.2f} x')
     print()
 
 
@@ -102,25 +106,27 @@ def test_bhd_hdr_bhr():
         y = fy[:, :, :r]
         ref_z = torch.einsum('bhd,hdr->bhr', x, y)
         z = torch.empty((b, h, r), device='cpu', dtype=torch.bfloat16)
-        if os.getenv('CORRECTNESS'):
-            print_kernel_io('einsum', dict(equation='bhd,hdr->bhr', a=x, b=y), dict(z=z))
-            with _CudaClosureContext(lambda: deep_gemm.einsum('bhd,hdr->bhr', x, y, z),
-                                     tensor_vars=('x', 'y', 'z')):
-                deep_gemm.einsum('bhd,hdr->bhr', x, y, z)
-            print_kernel_io('einsum', {}, dict(z=z))
-            assert calc_diff(z, ref_z) < 1e-10
 
-        t = bench_kineto(lambda: deep_gemm.einsum('bhd,hdr->bhr', x, y, z), 'einsum',
-                         tensor_vars=('x', 'y', 'z'),
-                         input_vars=('x', 'y'), output_vars=('z',), suppress_kineto_output=True)
-        t_cublaslt = bench_kineto(lambda: deep_gemm.einsum('bhd,hdr->bhr', x, y, z, use_cublaslt=True), 'einsum',
-                                  tensor_vars=('x', 'y', 'z'),
-                                  input_vars=('x', 'y'), output_vars=('z',), suppress_kineto_output=True)
-        print(f' > Perf ({b=:4.0f}, {h=}, {r=}, {d=}): ',
-              f'{t * 1e6:4.0f} us | '
-              f'{2 * b * h * r * d / t / 1e12:4.0f} TFLOPS | '
-              f'{count_bytes((x, y, z)) / t / 1e9:4.0f} GB/s | '
-              f'{t_cublaslt / t:4.2f} x')
+        print_kernel_io('einsum', dict(equation='bhd,hdr->bhr', a=x, b=y), dict(z=z))
+        with _CudaClosureContext(lambda: deep_gemm.einsum('bhd,hdr->bhr', x, y, z),
+                                    tensor_vars=('x', 'y', 'z')):
+            deep_gemm.einsum('bhd,hdr->bhr', x, y, z)
+        print_kernel_io('einsum', {}, dict(z=z))
+        assert calc_diff(z, ref_z) < 1e-10
+
+        if os.getenv('PERFORMANCE'):
+            (x, y, z) = to_device((x, y, z), 'cuda')
+            t = bench_kineto(lambda: deep_gemm.einsum('bhd,hdr->bhr', x, y, z), 'gemm_',
+                            tensor_vars=('x', 'y', 'z'),
+                            input_vars=('x', 'y'), output_vars=('z',), suppress_kineto_output=True)
+            t_cublaslt = bench_kineto(lambda: deep_gemm.einsum('bhd,hdr->bhr', x, y, z, use_cublaslt=True), 'nvjet',
+                                    tensor_vars=('x', 'y', 'z'),
+                                    input_vars=('x', 'y'), output_vars=('z',), suppress_kineto_output=True)
+            print(f' > Perf ({b=:4.0f}, {h=}, {r=}, {d=}): ',
+                f'{t * 1e6:4.0f} us | '
+                f'{2 * b * h * r * d / t / 1e12:4.0f} TFLOPS | '
+                f'{count_bytes((x, y, z)) / t / 1e9:4.0f} GB/s | '
+                f'{t_cublaslt / t:4.2f} x')
     print()
 
 
@@ -139,25 +145,26 @@ def test_fp8_bhr_hdr_bhd(use_ue8m0: bool = True):
             y_fp8[0][i], y_fp8[1][i] = per_block_cast_to_fp8(y[i], use_ue8m0=use_ue8m0)
         z = torch.empty((b, h, d), device='cpu', dtype=torch.bfloat16)
 
-        if os.getenv('CORRECTNESS'):
-            print_kernel_io('fp8_einsum', dict(equation='bhr,hdr->bhd', a=x_fp8, b=y_fp8), dict(z=z))
-            with _CudaClosureContext(lambda: deep_gemm.fp8_einsum('bhr,hdr->bhd', x_fp8, y_fp8, z),
-                                     tensor_vars=('x_fp8', 'y_fp8', 'z')):
-                deep_gemm.fp8_einsum('bhr,hdr->bhd', x_fp8, y_fp8, z)
-            print_kernel_io('fp8_einsum', {}, dict(z=z))
-            assert calc_diff(z, ref_z) < 1e-3
+        print_kernel_io('fp8_einsum', dict(equation='bhr,hdr->bhd', a=x_fp8, b=y_fp8), dict(z=z))
+        with _CudaClosureContext(lambda: deep_gemm.fp8_einsum('bhr,hdr->bhd', x_fp8, y_fp8, z),
+                                    tensor_vars=('x_fp8', 'y_fp8', 'z')):
+            deep_gemm.fp8_einsum('bhr,hdr->bhd', x_fp8, y_fp8, z)
+        print_kernel_io('fp8_einsum', {}, dict(z=z))
+        assert calc_diff(z, ref_z) < 1e-3
 
-        t = bench_kineto(lambda: deep_gemm.fp8_einsum('bhr,hdr->bhd', x_fp8, y_fp8, z), 'fp8_einsum',
-                         tensor_vars=('x_fp8', 'y_fp8', 'z'),
-                         input_vars=('x_fp8', 'y_fp8'), output_vars=('z',), suppress_kineto_output=True)
-        t_cublaslt = bench_kineto(lambda: deep_gemm.einsum('bhr,hdr->bhd', x, y, z, use_cublaslt=True), 'einsum',
-                                  tensor_vars=('x', 'y', 'z'),
-                                  input_vars=('x', 'y'), output_vars=('z',), suppress_kineto_output=True)
-        print(f' > Perf ({b=:4.0f}, {h=}, {r=}, {d=}): ',
-              f'{t * 1e6:4.0f} us | '
-              f'{2 * b * h * r * d / t / 1e12:4.0f} TFLOPS | '
-              f'{count_bytes((x_fp8, y_fp8, z)) / t / 1e9:4.0f} GB/s | '
-              f'{t_cublaslt / t:4.2f} x')
+        if os.getenv('PERFORMANCE'):
+            (x_fp8, y_fp8, z) = to_device((x_fp8, y_fp8, z), 'cuda')
+            t = bench_kineto(lambda: deep_gemm.fp8_einsum('bhr,hdr->bhd', x_fp8, y_fp8, z), 'gemm_',
+                            tensor_vars=('x_fp8', 'y_fp8', 'z'),
+                            input_vars=('x_fp8', 'y_fp8'), output_vars=('z',), suppress_kineto_output=True)
+            t_cublaslt = bench_kineto(lambda: deep_gemm.einsum('bhr,hdr->bhd', x, y, z, use_cublaslt=True), 'nvjet',
+                                    tensor_vars=('x', 'y', 'z'),
+                                    input_vars=('x', 'y'), output_vars=('z',), suppress_kineto_output=True)
+            print(f' > Perf ({b=:4.0f}, {h=}, {r=}, {d=}): ',
+                f'{t * 1e6:4.0f} us | '
+                f'{2 * b * h * r * d / t / 1e12:4.0f} TFLOPS | '
+                f'{count_bytes((x_fp8, y_fp8, z)) / t / 1e9:4.0f} GB/s | '
+                f'{t_cublaslt / t:4.2f} x')
     print()
 
 
@@ -178,25 +185,26 @@ def test_fp8_bhd_hdr_bhr(use_ue8m0: bool = True):
                 y_fp8[0][i], y_fp8[1][i] = per_block_cast_to_fp8(y[i], use_ue8m0=use_ue8m0)
             z = torch.empty((b, h, r), device='cpu', dtype=torch.bfloat16)
 
-            if os.getenv('CORRECTNESS'):
-                print_kernel_io('fp8_einsum', dict(equation='bhd,hdr->bhr', a=x_fp8, b=y_fp8), dict(z=z))
-                with _CudaClosureContext(lambda: deep_gemm.fp8_einsum('bhd,hdr->bhr', x_fp8, y_fp8, z),
-                                         tensor_vars=('x_fp8', 'y_fp8', 'z')):
-                    deep_gemm.fp8_einsum('bhd,hdr->bhr', x_fp8, y_fp8, z)
-                print_kernel_io('fp8_einsum', {}, dict(z=z))
-                assert calc_diff(z, ref_z) < 1e-3
+            print_kernel_io('fp8_einsum', dict(equation='bhd,hdr->bhr', a=x_fp8, b=y_fp8), dict(z=z))
+            with _CudaClosureContext(lambda: deep_gemm.fp8_einsum('bhd,hdr->bhr', x_fp8, y_fp8, z),
+                                        tensor_vars=('x_fp8', 'y_fp8', 'z')):
+                deep_gemm.fp8_einsum('bhd,hdr->bhr', x_fp8, y_fp8, z)
+            print_kernel_io('fp8_einsum', {}, dict(z=z))
+            assert calc_diff(z, ref_z) < 1e-3
 
-            t = bench_kineto(lambda: deep_gemm.fp8_einsum('bhd,hdr->bhr', x_fp8, y_fp8, z), 'fp8_einsum',
-                             tensor_vars=('x_fp8', 'y_fp8', 'z'),
-                             input_vars=('x_fp8', 'y_fp8'), output_vars=('z',), suppress_kineto_output=True)
-            t_cublaslt = bench_kineto(lambda: deep_gemm.einsum('bhd,hdr->bhr', x, y, z, use_cublaslt=True), 'einsum',
-                                      tensor_vars=('x', 'y', 'z'),
-                                      input_vars=('x', 'y'), output_vars=('z',), suppress_kineto_output=True)
-            print(f' > Perf ({b=:4.0f}, {h=}, {r=}, {d=}): ',
-                  f'{t * 1e6:4.0f} us | '
-                  f'{2 * b * h * r * d / t / 1e12:4.0f} TFLOPS | '
-                  f'{count_bytes((x_fp8, y_fp8, z)) / t / 1e9:4.0f} GB/s | '
-                  f'{t_cublaslt / t:4.2f} x')
+            if os.getenv('PERFORMANCE'):
+                (x_fp8, y_fp8, z) = to_device((x_fp8, y_fp8, z), 'cuda')
+                t = bench_kineto(lambda: deep_gemm.fp8_einsum('bhd,hdr->bhr', x_fp8, y_fp8, z), 'gemm_',
+                                tensor_vars=('x_fp8', 'y_fp8', 'z'),
+                                input_vars=('x_fp8', 'y_fp8'), output_vars=('z',), suppress_kineto_output=True)
+                t_cublaslt = bench_kineto(lambda: deep_gemm.einsum('bhd,hdr->bhr', x, y, z, use_cublaslt=True), 'nvjet',
+                                        tensor_vars=('x', 'y', 'z'),
+                                        input_vars=('x', 'y'), output_vars=('z',), suppress_kineto_output=True)
+                print(f' > Perf ({b=:4.0f}, {h=}, {r=}, {d=}): ',
+                    f'{t * 1e6:4.0f} us | '
+                    f'{2 * b * h * r * d / t / 1e12:4.0f} TFLOPS | '
+                    f'{count_bytes((x_fp8, y_fp8, z)) / t / 1e9:4.0f} GB/s | '
+                    f'{t_cublaslt / t:4.2f} x')
     print()
 
 
@@ -215,21 +223,23 @@ def test_fp8_bhd_bhr_hdr(use_ue8m0: bool = True):
             x_fp8 = (x_fp8[0].view(b, h, d), x_fp8[1].view(ceil_div(b, 128), h, d))
             y_fp8 = (y_fp8[0].view(b, h, r), y_fp8[1].view(ceil_div(b, 128), h, r))
             z = z_0.clone()
-            if os.getenv('CORRECTNESS'):
-                print_kernel_io('fp8_einsum', dict(equation='bhd,bhr->hdr', a=x_fp8, b=y_fp8, c=z, recipe=(1, 1, 128)), dict(z=z))
-                with _CudaClosureContext(lambda: deep_gemm.fp8_einsum('bhd,bhr->hdr', x_fp8, y_fp8, z, z, recipe=(1, 1, 128)),
-                                         tensor_vars=('x_fp8', 'y_fp8', 'z')):
-                    deep_gemm.fp8_einsum('bhd,bhr->hdr', x_fp8, y_fp8, z, z, recipe=(1, 1, 128))
-                print_kernel_io('fp8_einsum', {}, dict(z=z))
-                assert calc_diff(z, ref_z) < 1e-3
 
-            t = bench_kineto(lambda: deep_gemm.fp8_einsum('bhd,bhr->hdr', x_fp8, y_fp8, z, z, recipe=(1, 1, 128)), 'fp8_einsum',
-                             tensor_vars=('x_fp8', 'y_fp8', 'z'),
-                             input_vars=('x_fp8', 'y_fp8', 'z'), output_vars=('z',), suppress_kineto_output=True)
-            print(f' > Perf ({b=:4.0f}, {h=}, {r=}, {d=}): ',
-                  f'{t * 1e6:4.0f} us | '
-                  f'{2 * b * h * r * d / t / 1e12:4.0f} TFLOPS | '
-                  f'{count_bytes((x_fp8, y_fp8, z, z)) / t / 1e9:4.0f} GB/s')
+            print_kernel_io('fp8_einsum', dict(equation='bhd,bhr->hdr', a=x_fp8, b=y_fp8, c=z, recipe=(1, 1, 128)), dict(z=z))
+            with _CudaClosureContext(lambda: deep_gemm.fp8_einsum('bhd,bhr->hdr', x_fp8, y_fp8, z, z, recipe=(1, 1, 128)),
+                                        tensor_vars=('x_fp8', 'y_fp8', 'z')):
+                deep_gemm.fp8_einsum('bhd,bhr->hdr', x_fp8, y_fp8, z, z, recipe=(1, 1, 128))
+            print_kernel_io('fp8_einsum', {}, dict(z=z))
+            assert calc_diff(z, ref_z) < 1e-3
+
+            if os.getenv('PERFORMANCE'):
+                (x_fp8, y_fp8, z) = to_device((x_fp8, y_fp8, z), 'cuda')
+                t = bench_kineto(lambda: deep_gemm.fp8_einsum('bhd,bhr->hdr', x_fp8, y_fp8, z, z, recipe=(1, 1, 128)), 'gemm_',
+                                tensor_vars=('x_fp8', 'y_fp8', 'z'),
+                                input_vars=('x_fp8', 'y_fp8', 'z'), output_vars=('z',), suppress_kineto_output=True)
+                print(f' > Perf ({b=:4.0f}, {h=}, {r=}, {d=}): ',
+                    f'{t * 1e6:4.0f} us | '
+                    f'{2 * b * h * r * d / t / 1e12:4.0f} TFLOPS | '
+                    f'{count_bytes((x_fp8, y_fp8, z, z)) / t / 1e9:4.0f} GB/s')
     print()
 
 

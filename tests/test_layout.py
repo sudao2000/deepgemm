@@ -16,6 +16,7 @@ from generators import (
     enumerate_k_grouped_sf_layout,
     enumerate_k_grouped_psum_sf_layout,
     print_kernel_io,
+    to_device,
 )
 from deep_gemm.testing.bench import _CudaClosureContext
 
@@ -52,47 +53,44 @@ def test_sf_layout_kernels() -> None:
         x, fp32_sf = per_token_cast_to_fp8(x, use_ue8m0=use_ue8m0, gran_k=gran_k)
         fp32_sf = fp32_sf if num_groups == 1 else fp32_sf.view(num_groups, mn, -1)
         fp32_sf = fp32_sf if with_transpose else fp32_sf.transpose(-1, -2).contiguous().transpose(-1, -2)
-        algo_name : str
 
         # Correctness
         if use_ue8m0:
             impl, name = get_mn_major_tma_aligned_packed_ue8m0_tensor, 'pack_fp32_into_ue8m0'
-            algo_name = 'get_mn_major_tma_aligned_packed_ue8m0_tensor'
-            if os.getenv('CORRECTNESS'):
-                print_kernel_io('get_mn_major_tma_aligned_packed_ue8m0_tensor', dict(fp32_sf=fp32_sf), {})
-                with _CudaClosureContext(lambda: impl(fp32_sf), tensor_vars=('fp32_sf',)):
-                    packed_sf = impl(fp32_sf)
-                print_kernel_io('get_mn_major_tma_aligned_packed_ue8m0_tensor', {}, dict(packed_sf=packed_sf))
-                ref_packed_sf = get_mn_major_tma_aligned_packed_ue8m0_tensor_torch_impl(fp32_sf)
-                assert torch.equal(packed_sf, ref_packed_sf), f'{mn=}, {k=}, {with_transpose=}, {num_groups=}'
-                assert packed_sf.shape == ref_packed_sf.shape
-                assert all([packed_sf.stride(i) == ref_packed_sf.stride(i) for i in range(packed_sf.dim())])
+            print_kernel_io('get_mn_major_tma_aligned_packed_ue8m0_tensor', dict(fp32_sf=fp32_sf), {})
+            with _CudaClosureContext(lambda: impl(fp32_sf), tensor_vars=('fp32_sf',)):
+                packed_sf = impl(fp32_sf)
+            print_kernel_io('get_mn_major_tma_aligned_packed_ue8m0_tensor', {}, dict(packed_sf=packed_sf))
+            ref_packed_sf = get_mn_major_tma_aligned_packed_ue8m0_tensor_torch_impl(fp32_sf)
+            assert torch.equal(packed_sf, ref_packed_sf), f'{mn=}, {k=}, {with_transpose=}, {num_groups=}'
+            assert packed_sf.shape == ref_packed_sf.shape
+            assert all([packed_sf.stride(i) == ref_packed_sf.stride(i) for i in range(packed_sf.dim())])
         else:
             impl, name = get_mn_major_tma_aligned_tensor, 'transpose'
-            algo_name = 'get_mn_major_tma_aligned_tensor'
-            if os.getenv('CORRECTNESS'):
-                print_kernel_io('get_mn_major_tma_aligned_tensor', dict(fp32_sf=fp32_sf), {})
-                with _CudaClosureContext(lambda: impl(fp32_sf), tensor_vars=('fp32_sf',)):
-                    transposed_sf = impl(fp32_sf)
-                print_kernel_io('get_mn_major_tma_aligned_tensor', {}, dict(transposed_sf=transposed_sf))
-                tma_aligned_mn, sf_k = get_tma_aligned_size(mn, fp32_sf.element_size()), ceil_div(k, gran_k)
-                if num_groups > 1:
-                    assert transposed_sf.size(0) == num_groups
-                    assert transposed_sf.stride(0) == tma_aligned_mn * sf_k
-                assert transposed_sf.shape[-2:] == (mn, sf_k)
-                assert transposed_sf.stride()[-2:] == (1, tma_aligned_mn)
-                assert torch.equal(fp32_sf, transposed_sf)
+            print_kernel_io('get_mn_major_tma_aligned_tensor', dict(fp32_sf=fp32_sf), {})
+            with _CudaClosureContext(lambda: impl(fp32_sf), tensor_vars=('fp32_sf',)):
+                transposed_sf = impl(fp32_sf)
+            print_kernel_io('get_mn_major_tma_aligned_tensor', {}, dict(transposed_sf=transposed_sf))
+            tma_aligned_mn, sf_k = get_tma_aligned_size(mn, fp32_sf.element_size()), ceil_div(k, gran_k)
+            if num_groups > 1:
+                assert transposed_sf.size(0) == num_groups
+                assert transposed_sf.stride(0) == tma_aligned_mn * sf_k
+            assert transposed_sf.shape[-2:] == (mn, sf_k)
+            assert transposed_sf.stride()[-2:] == (1, tma_aligned_mn)
+            assert torch.equal(fp32_sf, transposed_sf)
 
         # Performance
-        try:
-            t = bench_kineto(lambda: impl(fp32_sf), algo_name,
-                             tensor_vars=('fp32_sf',),
-                             input_vars=('fp32_sf',), output_vars=())
-        except AssertionError as e:
-            # Some cases may fallback to PyTorch impl
-            t = 0
-        print(f' > Perf ({num_groups=:2}, {mn=:5}, {k=:5}, transpose={int(with_transpose)}, use_ue8m0={int(use_ue8m0)}, gran_k={gran_k:3}): '
-              f'{t * 1e6:4.0f} us | {count_bytes(fp32_sf, impl(fp32_sf)) / 1e9 / t if t else 0:4.0f} GB/s')
+        if os.getenv('PERFORMANCE'):
+            try:
+                fp32_sf = fp32_sf.to('cuda')
+                t = bench_kineto(lambda: impl(fp32_sf), name,
+                                tensor_vars=('fp32_sf',),
+                                input_vars=('fp32_sf',), output_vars=())
+            except AssertionError as e:
+                # Some cases may fallback to PyTorch impl
+                t = 0
+            print(f' > Perf ({num_groups=:2}, {mn=:5}, {k=:5}, transpose={int(with_transpose)}, use_ue8m0={int(use_ue8m0)}, gran_k={gran_k:3}): '
+                f'{t * 1e6:4.0f} us | {count_bytes(fp32_sf, impl(fp32_sf)) / 1e9 / t if t else 0:4.0f} GB/s')
     print()
 
 
@@ -105,25 +103,26 @@ def test_k_grouped_sf_layout_kernels() -> None:
         x = torch.randn((sum(ks_cpu), mn), dtype=torch.bfloat16, device='cuda')
         x, fp32_sf = per_channel_cast_to_fp8(x, use_ue8m0=True, gran_k=gran_k)
 
-        if os.getenv('CORRECTNESS'):
-            print_kernel_io('get_k_grouped_mn_major_tma_aligned_packed_ue8m0_tensor',
-                            dict(fp32_sf=fp32_sf, grouped_layout=grouped_layout, ks_cpu=ks_cpu, gran_k=gran_k,
-                                tile_size_k=gran_k), {})
-            packed_sf = get_k_grouped_mn_major_tma_aligned_packed_ue8m0_tensor(fp32_sf, grouped_layout, ks_cpu, gran_k, gran_k)
-            print_kernel_io('get_k_grouped_mn_major_tma_aligned_packed_ue8m0_tensor', {}, dict(packed_sf=packed_sf))
-            split_packed_sf = packed_sf.split(packed_sf_ks)
-            split_fp32_sf = fp32_sf.split(sf_ks)
-            for i in range(num_groups):
-                ref_packed_sf = get_mn_major_tma_aligned_packed_ue8m0_tensor_torch_impl(split_fp32_sf[i].T).T
-                assert torch.equal(split_packed_sf[i], ref_packed_sf), f'{i=}'
+        print_kernel_io('get_k_grouped_mn_major_tma_aligned_packed_ue8m0_tensor',
+                        dict(fp32_sf=fp32_sf, grouped_layout=grouped_layout, ks_cpu=ks_cpu, gran_k=gran_k,
+                            tile_size_k=gran_k), {})
+        packed_sf = get_k_grouped_mn_major_tma_aligned_packed_ue8m0_tensor(fp32_sf, grouped_layout, ks_cpu, gran_k, gran_k)
+        print_kernel_io('get_k_grouped_mn_major_tma_aligned_packed_ue8m0_tensor', {}, dict(packed_sf=packed_sf))
+        split_packed_sf = packed_sf.split(packed_sf_ks)
+        split_fp32_sf = fp32_sf.split(sf_ks)
+        for i in range(num_groups):
+            ref_packed_sf = get_mn_major_tma_aligned_packed_ue8m0_tensor_torch_impl(split_fp32_sf[i].T).T
+            assert torch.equal(split_packed_sf[i], ref_packed_sf), f'{i=}'
 
         # Performance
-        t = bench_kineto(lambda: get_k_grouped_mn_major_tma_aligned_packed_ue8m0_tensor(fp32_sf, grouped_layout, ks_cpu, gran_k, gran_k), 'pack_fp32_into_ue8m0',
-                         tensor_vars=('fp32_sf', 'grouped_layout', 'ks_cpu', 'gran_k'),
-                         input_vars=('fp32_sf', 'grouped_layout', 'ks_cpu', 'gran_k'), output_vars=())
-        print(f' > Perf ({num_groups=:3}, {mn=:5}, sum_k={sum(ks_cpu):5}, gran_k={gran_k:3}):'
-              f'{t * 1e6:4.0f} us | '
-              f'{count_bytes(fp32_sf, packed_sf, grouped_layout) / 1e9 / t:4.0f} GB/s')
+        if os.getenv('PERFORMANCE'):
+            (fp32_sf, packed_sf, grouped_layout) = to_device((fp32_sf, packed_sf, grouped_layout), 'cuda')
+            t = bench_kineto(lambda: get_k_grouped_mn_major_tma_aligned_packed_ue8m0_tensor(fp32_sf, grouped_layout, ks_cpu, gran_k, gran_k), 'pack_fp32_into_ue8m0',
+                            tensor_vars=('fp32_sf', 'grouped_layout', 'ks_cpu', 'gran_k'),
+                            input_vars=('fp32_sf', 'grouped_layout', 'ks_cpu', 'gran_k'), output_vars=())
+            print(f' > Perf ({num_groups=:3}, {mn=:5}, sum_k={sum(ks_cpu):5}, gran_k={gran_k:3}):'
+                f'{t * 1e6:4.0f} us | '
+                f'{count_bytes(fp32_sf, packed_sf, grouped_layout) / 1e9 / t:4.0f} GB/s')
     print()
 
 
@@ -149,45 +148,46 @@ def test_k_grouped_psum_sf_layout_kernels() -> None:
             sf_start = sf_end
         ref_packed_sf = torch.cat(ref_packed_sf)
 
-        if os.getenv('CORRECTNESS'):
-            print_kernel_io('get_k_grouped_mn_major_tma_aligned_packed_ue8m0_tensor',
-                            dict(fp32_sf=fp32_sf, grouped_layout=grouped_layout, ks_cpu=real_ks_cpu, gran_k=gran_k,
-                                k_alignment=k_alignment, use_psum_layout=True), {})
-            exact_packed_sf = get_k_grouped_mn_major_tma_aligned_packed_ue8m0_tensor(fp32_sf, grouped_layout, real_ks_cpu, gran_k, k_alignment, use_psum_layout=True)
-            print_kernel_io('get_k_grouped_mn_major_tma_aligned_packed_ue8m0_tensor', {}, dict(packed_sf=exact_packed_sf))
-            # Aligned K sizes match the GEMM API path and may allocate upper-bound rows.
-            print_kernel_io('get_k_grouped_mn_major_tma_aligned_packed_ue8m0_tensor',
-                            dict(fp32_sf=fp32_sf, grouped_layout=grouped_layout, ks_cpu=aligned_ks_cpu, gran_k=gran_k,
-                                k_alignment=k_alignment, use_psum_layout=True), {})
-            packed_sf = get_k_grouped_mn_major_tma_aligned_packed_ue8m0_tensor(fp32_sf, grouped_layout, aligned_ks_cpu, gran_k, k_alignment, use_psum_layout=True)
-            print_kernel_io('get_k_grouped_mn_major_tma_aligned_packed_ue8m0_tensor', {}, dict(packed_sf=packed_sf))
+        print_kernel_io('get_k_grouped_mn_major_tma_aligned_packed_ue8m0_tensor',
+                        dict(fp32_sf=fp32_sf, grouped_layout=grouped_layout, ks_cpu=real_ks_cpu, gran_k=gran_k,
+                            k_alignment=k_alignment, use_psum_layout=True), {})
+        exact_packed_sf = get_k_grouped_mn_major_tma_aligned_packed_ue8m0_tensor(fp32_sf, grouped_layout, real_ks_cpu, gran_k, k_alignment, use_psum_layout=True)
+        print_kernel_io('get_k_grouped_mn_major_tma_aligned_packed_ue8m0_tensor', {}, dict(packed_sf=exact_packed_sf))
+        # Aligned K sizes match the GEMM API path and may allocate upper-bound rows.
+        print_kernel_io('get_k_grouped_mn_major_tma_aligned_packed_ue8m0_tensor',
+                        dict(fp32_sf=fp32_sf, grouped_layout=grouped_layout, ks_cpu=aligned_ks_cpu, gran_k=gran_k,
+                            k_alignment=k_alignment, use_psum_layout=True), {})
+        packed_sf = get_k_grouped_mn_major_tma_aligned_packed_ue8m0_tensor(fp32_sf, grouped_layout, aligned_ks_cpu, gran_k, k_alignment, use_psum_layout=True)
+        print_kernel_io('get_k_grouped_mn_major_tma_aligned_packed_ue8m0_tensor', {}, dict(packed_sf=packed_sf))
 
-            # Unsynced upper-bound paths
-            print_kernel_io('get_k_grouped_mn_major_tma_aligned_packed_ue8m0_tensor',
-                            dict(fp32_sf=fp32_sf, grouped_layout=grouped_layout, ks_cpu=None, gran_k=gran_k,
-                                k_alignment=k_alignment, use_psum_layout=True), {})
-            upper_bound_packed_sf = get_k_grouped_mn_major_tma_aligned_packed_ue8m0_tensor(
-                fp32_sf, grouped_layout, None, gran_k, k_alignment, use_psum_layout=True)
-            print_kernel_io('get_k_grouped_mn_major_tma_aligned_packed_ue8m0_tensor', {}, dict(packed_sf=upper_bound_packed_sf))
-            print_kernel_io('get_k_grouped_mn_major_tma_aligned_packed_ue8m0_tensor',
-                            dict(fp32_sf=fp32_sf, grouped_layout=grouped_layout, ks_cpu=[], gran_k=gran_k,
-                                k_alignment=k_alignment, use_psum_layout=True), {})
-            empty_ks_packed_sf = get_k_grouped_mn_major_tma_aligned_packed_ue8m0_tensor(
-                fp32_sf, grouped_layout, [], gran_k, k_alignment, use_psum_layout=True)
-            print_kernel_io('get_k_grouped_mn_major_tma_aligned_packed_ue8m0_tensor', {}, dict(packed_sf=empty_ks_packed_sf))
+        # Unsynced upper-bound paths
+        print_kernel_io('get_k_grouped_mn_major_tma_aligned_packed_ue8m0_tensor',
+                        dict(fp32_sf=fp32_sf, grouped_layout=grouped_layout, ks_cpu=None, gran_k=gran_k,
+                            k_alignment=k_alignment, use_psum_layout=True), {})
+        upper_bound_packed_sf = get_k_grouped_mn_major_tma_aligned_packed_ue8m0_tensor(
+            fp32_sf, grouped_layout, None, gran_k, k_alignment, use_psum_layout=True)
+        print_kernel_io('get_k_grouped_mn_major_tma_aligned_packed_ue8m0_tensor', {}, dict(packed_sf=upper_bound_packed_sf))
+        print_kernel_io('get_k_grouped_mn_major_tma_aligned_packed_ue8m0_tensor',
+                        dict(fp32_sf=fp32_sf, grouped_layout=grouped_layout, ks_cpu=[], gran_k=gran_k,
+                            k_alignment=k_alignment, use_psum_layout=True), {})
+        empty_ks_packed_sf = get_k_grouped_mn_major_tma_aligned_packed_ue8m0_tensor(
+            fp32_sf, grouped_layout, [], gran_k, k_alignment, use_psum_layout=True)
+        print_kernel_io('get_k_grouped_mn_major_tma_aligned_packed_ue8m0_tensor', {}, dict(packed_sf=empty_ks_packed_sf))
 
-            assert torch.equal(exact_packed_sf, ref_packed_sf)
-            assert torch.equal(packed_sf[:ref_packed_sf.size(0)], ref_packed_sf)
-            assert torch.equal(upper_bound_packed_sf[:ref_packed_sf.size(0)], ref_packed_sf)
-            assert torch.equal(empty_ks_packed_sf[:ref_packed_sf.size(0)], ref_packed_sf)
+        assert torch.equal(exact_packed_sf, ref_packed_sf)
+        assert torch.equal(packed_sf[:ref_packed_sf.size(0)], ref_packed_sf)
+        assert torch.equal(upper_bound_packed_sf[:ref_packed_sf.size(0)], ref_packed_sf)
+        assert torch.equal(empty_ks_packed_sf[:ref_packed_sf.size(0)], ref_packed_sf)
 
         # Performance
-        t = bench_kineto(lambda: get_k_grouped_mn_major_tma_aligned_packed_ue8m0_tensor(fp32_sf, grouped_layout, aligned_ks_cpu, gran_k, k_alignment, use_psum_layout=True), 'pack_fp32_into_ue8m0',
-                         tensor_vars=('fp32_sf', 'grouped_layout', 'aligned_ks_cpu', 'gran_k', 'k_alignment'),
-                         input_vars=('fp32_sf', 'grouped_layout', 'aligned_ks_cpu', 'gran_k', 'k_alignment'), output_vars=())
-        print(f' > Perf ({num_groups=:3}, {mn=:5}, sum_k={sum(real_ks_cpu):5}, gran_k={gran_k:3}, k_alignment={k_alignment:3}):'
-              f'{t * 1e6:4.0f} us | '
-              f'{count_bytes(fp32_sf, packed_sf, grouped_layout) / 1e9 / t:4.0f} GB/s')
+        if os.getenv('PERFORMANCE'):
+            (fp32_sf, grouped_layout, aligned_ks_cpu, gran_k, k_alignment) = to_device((fp32_sf, grouped_layout, aligned_ks_cpu, gran_k, k_alignment), 'cuda')
+            t = bench_kineto(lambda: get_k_grouped_mn_major_tma_aligned_packed_ue8m0_tensor(fp32_sf, grouped_layout, aligned_ks_cpu, gran_k, k_alignment, use_psum_layout=True), 'pack_fp32_into_ue8m0',
+                            tensor_vars=('fp32_sf', 'grouped_layout', 'aligned_ks_cpu', 'gran_k', 'k_alignment'),
+                            input_vars=('fp32_sf', 'grouped_layout', 'aligned_ks_cpu', 'gran_k', 'k_alignment'), output_vars=())
+            print(f' > Perf ({num_groups=:3}, {mn=:5}, sum_k={sum(real_ks_cpu):5}, gran_k={gran_k:3}, k_alignment={k_alignment:3}):'
+                f'{t * 1e6:4.0f} us | '
+                f'{count_bytes(fp32_sf, packed_sf, grouped_layout) / 1e9 / t:4.0f} GB/s')
     print()
 
 
