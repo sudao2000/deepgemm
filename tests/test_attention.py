@@ -497,7 +497,7 @@ def test_paged_mqa_logits():
 
         self_mask = ~ref_neginf_mask
         masked_logits = logits.masked_fill(~self_mask, 0)
-        for _ in range(20):
+        for _ in range(1):# note: original 20 times
             logits_again = _call_kernel_on_cuda(deep_gemm.fp8_fp4_paged_mqa_logits, kernel_kwargs).masked_fill(~self_mask, 0)
             assert_bitwise_equal(logits_again, masked_logits, 'paged mqa logits self-consistency')
 

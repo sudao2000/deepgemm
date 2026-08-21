@@ -13,8 +13,8 @@ from utils import (
 )
 from generators import (
     get_arch_major, layout_masked_to_psum, align,
-    enumerate_normal, enumerate_m_grouped_contiguous, enumerate_m_grouped_masked, enumerate_k_grouped_contiguous,
-    enumerate_k_grouped_contiguous_test_variants,
+    enumerate_normal, enumerate_m_grouped_contiguous, enumerate_m_grouped_masked,
+    enumerate_k_grouped_contiguous_with_variants,
     generate_normal, generate_m_grouped_contiguous, generate_m_grouped_masked, generate_k_grouped_contiguous,
     generate_k_grouped_contiguous_psum,
     get_mk_alignment_for_contiguous_layout,
@@ -24,7 +24,7 @@ from generators import (
 from deep_gemm.testing.bench import _CudaClosureContext
 
 
-def test_gemm() -> None:
+def test_gemm(test_alias: bool) -> None:
     print('Testing GEMM:')
     scores = []
     for kernel_type, _, m, n, k, major_a, major_b, accumulate, out_dtype in enumerate_normal(torch.bfloat16):
@@ -33,21 +33,20 @@ def test_gemm() -> None:
         out_opt    = 'FP32' if out_dtype == torch.float else 'BF16'
         acc_opt    = f'acc={int(accumulate)}'
 
-        for test_alias in (False, True):
-            a, b, c, d, ref_d = generate_normal(m, n, k, major_a, major_b, accumulate, out_dtype, kernel_type, use_bf16=True)
-            func_name = f'bf16_gemm_{major_opt.lower() if test_alias else "nt"}'
-            if test_alias:
-                a = a if major_a.is_k_major() else a.T
-                b = b if major_b.is_k_major() else b.T
-                assert a.is_contiguous() and b.is_contiguous()
-            print_kernel_io(func_name, dict(a=a, b=b, c=c), dict(d=d))
-            with _CudaClosureContext(lambda: getattr(deep_gemm, func_name)(a, b, d, c=c),
-                                    tensor_vars=('a', 'b', 'd', 'c')):
-                getattr(deep_gemm, func_name)(a, b, d, c=c)
-            print_kernel_io(func_name, {}, dict(d=d))
-            diff = calc_diff(d, ref_d)
-            assert diff < 1e-5, (f'{m=}, {n=}, {k=}, {major_opt=}, {accumulate=}, {out_dtype=}, '
-                                f'{diff:.5f}, alias={test_alias}')
+        a, b, c, d, ref_d = generate_normal(m, n, k, major_a, major_b, accumulate, out_dtype, kernel_type, use_bf16=True)
+        func_name = f'bf16_gemm_{major_opt.lower() if test_alias else "nt"}'
+        if test_alias:
+            a = a if major_a.is_k_major() else a.T
+            b = b if major_b.is_k_major() else b.T
+            assert a.is_contiguous() and b.is_contiguous()
+        print_kernel_io(func_name, dict(a=a, b=b, c=c), dict(d=d))
+        with _CudaClosureContext(lambda: getattr(deep_gemm, func_name)(a, b, d, c=c),
+                                tensor_vars=('a', 'b', 'd', 'c')):
+            getattr(deep_gemm, func_name)(a, b, d, c=c)
+        print_kernel_io(func_name, {}, dict(d=d))
+        diff = calc_diff(d, ref_d)
+        assert diff < 1e-5, (f'{m=}, {n=}, {k=}, {major_opt=}, {accumulate=}, {out_dtype=}, '
+                            f'{diff:.5f}, alias={test_alias}')
 
         if os.getenv('PERFORMANCE'):
             a, b, c, d, ref_d = generate_normal(m, n, k, major_a, major_b, accumulate, out_dtype, kernel_type, use_bf16=True)
@@ -68,7 +67,7 @@ def test_gemm() -> None:
                 print(f"Average speedup over cuBLASLt: {float(np.prod(scores)) ** (1.0 / len(scores)):.3f}x\n")
 
 
-def test_m_grouped_gemm_contiguous() -> None:
+def test_m_grouped_gemm_contiguous(test_alias: bool) -> None:
     print('Testing m-grouped contiguous GEMM:')
 
     for _, _, num_groups, expected_m_per_group, n, k, major_a, major_b, use_psum_layout, ensure_zero_padding in enumerate_m_grouped_contiguous(torch.bfloat16):
@@ -79,37 +78,36 @@ def test_m_grouped_gemm_contiguous() -> None:
         alignment = deep_gemm.get_theoretical_mk_alignment_for_contiguous_layout()
         deep_gemm.set_mk_alignment_for_contiguous_layout(alignment)
 
-        for test_alias in (False, True):
-            m, a, b, grouped_layout, d, ref_d = generate_m_grouped_contiguous(num_groups, expected_m_per_group, n, k, major_a, major_b,
-                                                                              use_bf16=True, use_psum_layout=use_psum_layout)
-            func_name = f"m_grouped_bf16_gemm_{(major_opt.lower() if test_alias else 'nt')}_contiguous"
-            if test_alias:
-                assert major_a.is_k_major()
-                b = b if major_b.is_k_major() else b.mT
-                assert a[0].is_contiguous() and b[0].is_contiguous()
+        m, a, b, grouped_layout, d, ref_d = generate_m_grouped_contiguous(num_groups, expected_m_per_group, n, k, major_a, major_b,
+                                                                            use_bf16=True, use_psum_layout=use_psum_layout)
+        func_name = f"m_grouped_bf16_gemm_{(major_opt.lower() if test_alias else 'nt')}_contiguous"
+        if test_alias:
+            assert major_a.is_k_major()
+            b = b if major_b.is_k_major() else b.mT
+            assert a[0].is_contiguous() and b[0].is_contiguous()
 
-            print_kernel_io(func_name, dict(a=a, b=b, grouped_layout=grouped_layout,
-                                            use_psum_layout=use_psum_layout,
-                                            ensure_zero_padding=ensure_zero_padding), dict(d=d))
-            with _CudaClosureContext(lambda: getattr(deep_gemm, func_name)(a, b, d, grouped_layout,
-                                                                        use_psum_layout=use_psum_layout,
-                                                                        ensure_zero_padding=ensure_zero_padding),
-                                    tensor_vars=('a', 'b', 'd', 'grouped_layout')):
-                getattr(deep_gemm, func_name)(a, b, d, grouped_layout, use_psum_layout=use_psum_layout,
-                                            ensure_zero_padding=ensure_zero_padding)
-            print_kernel_io(func_name, {}, dict(d=d))
-            if use_psum_layout:
-                for j in range(num_groups):
-                    start = 0 if j == 0 else align(grouped_layout[j - 1], get_mk_alignment_for_contiguous_layout())
-                    end = grouped_layout[j]
-                    diff = calc_diff(d[start : end], ref_d[start : end])
-                    assert diff < 1e-5, (f'{m=}, {n=}, {k=}, {major_opt}, {diff:.5f}, '
-                                        f'alias={test_alias}, {ensure_zero_padding=}')
-                if ensure_zero_padding:
-                    assert_psum_zero_padding(a, d, grouped_layout, 'BF16')
-            else:
-                diff = calc_diff(d, ref_d)
-                assert diff < 1e-5, f'{m=}, {n=}, {k=}, {major_opt}, {diff:.5f}, alias={test_alias}'
+        print_kernel_io(func_name, dict(a=a, b=b, grouped_layout=grouped_layout,
+                                        use_psum_layout=use_psum_layout,
+                                        ensure_zero_padding=ensure_zero_padding), dict(d=d))
+        with _CudaClosureContext(lambda: getattr(deep_gemm, func_name)(a, b, d, grouped_layout,
+                                                                    use_psum_layout=use_psum_layout,
+                                                                    ensure_zero_padding=ensure_zero_padding),
+                                tensor_vars=('a', 'b', 'd', 'grouped_layout')):
+            getattr(deep_gemm, func_name)(a, b, d, grouped_layout, use_psum_layout=use_psum_layout,
+                                        ensure_zero_padding=ensure_zero_padding)
+        print_kernel_io(func_name, {}, dict(d=d))
+        if use_psum_layout:
+            for j in range(num_groups):
+                start = 0 if j == 0 else align(grouped_layout[j - 1], get_mk_alignment_for_contiguous_layout())
+                end = grouped_layout[j]
+                diff = calc_diff(d[start : end], ref_d[start : end])
+                assert diff < 1e-5, (f'{m=}, {n=}, {k=}, {major_opt}, {diff:.5f}, '
+                                    f'alias={test_alias}, {ensure_zero_padding=}')
+            if ensure_zero_padding:
+                assert_psum_zero_padding(a, d, grouped_layout, 'BF16')
+        else:
+            diff = calc_diff(d, ref_d)
+            assert diff < 1e-5, f'{m=}, {n=}, {k=}, {major_opt}, {diff:.5f}, alias={test_alias}'
 
         if os.getenv('PERFORMANCE'):
             m, a, b, grouped_layout, d, ref_d = generate_m_grouped_contiguous(num_groups, expected_m_per_group, n, k, major_a, major_b,
@@ -211,55 +209,53 @@ def test_m_grouped_gemm_masked() -> None:
 def test_k_grouped_gemm_contiguous() -> None:
     print('Testing k-grouped contiguous GEMM:')
 
-    for num_groups, m, n, major_a, major_b, real_ks_cpu, aligned_ks_cpu, _, _, alignment, use_psum_layout in enumerate_k_grouped_contiguous(torch.bfloat16):
-        include_k_tail = get_arch_major() == 10 and alignment == 32
-        for test_real_ks_cpu, test_aligned_ks_cpu, _, test_k_tail in enumerate_k_grouped_contiguous_test_variants(real_ks_cpu, alignment, use_psum_layout, include_k_tail):
-            if use_psum_layout:
-                total_k, a, b, c, d, ref_d, grouped_layout, _ = generate_k_grouped_contiguous_psum(num_groups, m, n, major_a, major_b, test_real_ks_cpu, k_alignment=alignment, use_bf16=True, gran_k=alignment)
-            else:
-                total_k, a, b, c, d, ref_d, grouped_layout, _ = generate_k_grouped_contiguous(num_groups, m, n, major_a, major_b, test_aligned_ks_cpu, use_bf16=True)
-            c_orig = c.clone() if use_psum_layout else None
+    for num_groups, m, n, major_a, major_b, real_ks_cpu, aligned_ks_cpu, test_real_ks_cpu, test_aligned_ks_cpu, _, _, alignment, use_psum_layout, _, test_k_tail in enumerate_k_grouped_contiguous_with_variants(torch.bfloat16):
+        if use_psum_layout:
+            total_k, a, b, c, d, ref_d, grouped_layout, _ = generate_k_grouped_contiguous_psum(num_groups, m, n, major_a, major_b, test_real_ks_cpu, k_alignment=alignment, use_bf16=True, gran_k=alignment)
+        else:
+            total_k, a, b, c, d, ref_d, grouped_layout, _ = generate_k_grouped_contiguous(num_groups, m, n, major_a, major_b, test_aligned_ks_cpu, use_bf16=True)
+        c_orig = c.clone() if use_psum_layout else None
 
+        print_kernel_io('k_grouped_bf16_gemm_tn_contiguous',
+                        dict(a=a, b=b, ks_cpu=test_aligned_ks_cpu, grouped_layout=grouped_layout, c=c,
+                            use_psum_layout=use_psum_layout), dict(d=d))
+        with _CudaClosureContext(lambda: deep_gemm.k_grouped_bf16_gemm_tn_contiguous(
+                a, b, d, test_aligned_ks_cpu, grouped_layout, c, use_psum_layout=use_psum_layout),
+                tensor_vars=('a', 'b', 'c', 'd', 'grouped_layout')):
+            deep_gemm.k_grouped_bf16_gemm_tn_contiguous(a, b, d, test_aligned_ks_cpu, grouped_layout, c,
+                                                        use_psum_layout=use_psum_layout)
+        print_kernel_io('k_grouped_bf16_gemm_tn_contiguous', {}, dict(d=d))
+
+        diff = calc_diff(d, ref_d)
+        assert diff < 1e-5, f'{m=}, {n=}, {total_k=}, {test_real_ks_cpu=}, {test_aligned_ks_cpu=}, {use_psum_layout=}, {test_k_tail=}, {diff:.7f}'
+
+        # Unsynced psum paths
+        if use_psum_layout:
+            c.copy_(c_orig)
             print_kernel_io('k_grouped_bf16_gemm_tn_contiguous',
-                            dict(a=a, b=b, ks_cpu=test_aligned_ks_cpu, grouped_layout=grouped_layout, c=c,
-                                use_psum_layout=use_psum_layout), dict(d=d))
+                            dict(a=a, b=b, ks_cpu=None, grouped_layout=grouped_layout, c=c,
+                                use_psum_layout=True), dict(d=d))
             with _CudaClosureContext(lambda: deep_gemm.k_grouped_bf16_gemm_tn_contiguous(
-                    a, b, d, test_aligned_ks_cpu, grouped_layout, c, use_psum_layout=use_psum_layout),
+                    a, b, d, None, grouped_layout, c, use_psum_layout=True),
                     tensor_vars=('a', 'b', 'c', 'd', 'grouped_layout')):
-                deep_gemm.k_grouped_bf16_gemm_tn_contiguous(a, b, d, test_aligned_ks_cpu, grouped_layout, c,
-                                                            use_psum_layout=use_psum_layout)
+                deep_gemm.k_grouped_bf16_gemm_tn_contiguous(a, b, d, None, grouped_layout, c,
+                                                            use_psum_layout=True)
             print_kernel_io('k_grouped_bf16_gemm_tn_contiguous', {}, dict(d=d))
-
             diff = calc_diff(d, ref_d)
-            assert diff < 1e-5, f'{m=}, {n=}, {total_k=}, {test_real_ks_cpu=}, {test_aligned_ks_cpu=}, {use_psum_layout=}, {test_k_tail=}, {diff:.7f}'
+            assert diff < 1e-5, f'None ks_cpu path: {m=}, {n=}, {total_k=}, {test_real_ks_cpu=}, {diff:.7f}'
 
-            # Unsynced psum paths
-            if use_psum_layout:
-                c.copy_(c_orig)
-                print_kernel_io('k_grouped_bf16_gemm_tn_contiguous',
-                                dict(a=a, b=b, ks_cpu=None, grouped_layout=grouped_layout, c=c,
-                                    use_psum_layout=True), dict(d=d))
-                with _CudaClosureContext(lambda: deep_gemm.k_grouped_bf16_gemm_tn_contiguous(
-                        a, b, d, None, grouped_layout, c, use_psum_layout=True),
-                        tensor_vars=('a', 'b', 'c', 'd', 'grouped_layout')):
-                    deep_gemm.k_grouped_bf16_gemm_tn_contiguous(a, b, d, None, grouped_layout, c,
-                                                                use_psum_layout=True)
-                print_kernel_io('k_grouped_bf16_gemm_tn_contiguous', {}, dict(d=d))
-                diff = calc_diff(d, ref_d)
-                assert diff < 1e-5, f'None ks_cpu path: {m=}, {n=}, {total_k=}, {test_real_ks_cpu=}, {diff:.7f}'
-
-                c.copy_(c_orig)
-                print_kernel_io('k_grouped_bf16_gemm_tn_contiguous',
-                                dict(a=a, b=b, ks_cpu=[], grouped_layout=grouped_layout, c=c,
-                                    use_psum_layout=True), dict(d=d))
-                with _CudaClosureContext(lambda: deep_gemm.k_grouped_bf16_gemm_tn_contiguous(
-                        a, b, d, [], grouped_layout, c, use_psum_layout=True),
-                        tensor_vars=('a', 'b', 'c', 'd', 'grouped_layout')):
-                    deep_gemm.k_grouped_bf16_gemm_tn_contiguous(a, b, d, [], grouped_layout, c,
-                                                                use_psum_layout=True)
-                print_kernel_io('k_grouped_bf16_gemm_tn_contiguous', {}, dict(d=d))
-                diff = calc_diff(d, ref_d)
-                assert diff < 1e-5, f'empty ks_cpu path: {m=}, {n=}, {total_k=}, {test_real_ks_cpu=}, {diff:.7f}'
+            c.copy_(c_orig)
+            print_kernel_io('k_grouped_bf16_gemm_tn_contiguous',
+                            dict(a=a, b=b, ks_cpu=[], grouped_layout=grouped_layout, c=c,
+                                use_psum_layout=True), dict(d=d))
+            with _CudaClosureContext(lambda: deep_gemm.k_grouped_bf16_gemm_tn_contiguous(
+                    a, b, d, [], grouped_layout, c, use_psum_layout=True),
+                    tensor_vars=('a', 'b', 'c', 'd', 'grouped_layout')):
+                deep_gemm.k_grouped_bf16_gemm_tn_contiguous(a, b, d, [], grouped_layout, c,
+                                                            use_psum_layout=True)
+            print_kernel_io('k_grouped_bf16_gemm_tn_contiguous', {}, dict(d=d))
+            diff = calc_diff(d, ref_d)
+            assert diff < 1e-5, f'empty ks_cpu path: {m=}, {n=}, {total_k=}, {test_real_ks_cpu=}, {diff:.7f}'
 
         # Test performance
         if os.getenv('PERFORMANCE'):

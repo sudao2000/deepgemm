@@ -26,11 +26,15 @@ import torch
 
 import test_bf16
 
+def map_index_to_test_alias(index) -> bool:
+    operands = (True, False)
+    return operands[index % 2]
+
 SUITES = {
-    'test_gemm':         ('enumerate_normal',                 test_bf16.test_gemm),
-    'test_m_grouped_gemm_contiguous': ('enumerate_m_grouped_contiguous',   test_bf16.test_m_grouped_gemm_contiguous),
+    'test_gemm':         ('enumerate_normal',                 test_bf16.test_gemm, map_index_to_test_alias),
+    'test_m_grouped_gemm_contiguous': ('enumerate_m_grouped_contiguous',   test_bf16.test_m_grouped_gemm_contiguous, map_index_to_test_alias),
     'test_m_grouped_gemm_masked':     ('enumerate_m_grouped_masked',       test_bf16.test_m_grouped_gemm_masked),
-    'test_k_grouped_gemm_contiguous': ('enumerate_k_grouped_contiguous',   test_bf16.test_k_grouped_gemm_contiguous),
+    'test_k_grouped_gemm_contiguous': ('enumerate_k_grouped_contiguous_with_variants',   test_bf16.test_k_grouped_gemm_contiguous),
     'test_cublaslt_gemm':     ('enumerate_normal',                 test_bf16.test_cublaslt_gemm),
 }
 
@@ -42,7 +46,7 @@ def main() -> None:
         return
 
     name = args[0]
-    enum_name, test_fn = SUITES[name]
+    enum_name, test_fn, map_test_alias = SUITES[name]
     enum_fn = getattr(test_bf16, enum_name)
     cases = list(enum_fn(dtype=torch.bfloat16) if enum_name == 'enumerate_normal' else enum_fn(torch.bfloat16))
 
@@ -65,7 +69,10 @@ def main() -> None:
     setattr(test_bf16, enum_name, lambda *a, **kw: iter(selected))
     for i, case in zip(indices, selected):
         print(f'[test_bf16 {name} #{i}] {case}')
-    test_fn()
+    if map_test_alias is not None:
+        test_fn(map_test_alias(int(args[1])))
+    else:
+        test_fn()
     print()
 
 
