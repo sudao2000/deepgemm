@@ -25,13 +25,16 @@ import torch
 
 import test_fp8_fp4
 
-SUITES = {
-    'test_gemm':         ('enumerate_normal',                 test_fp8_fp4.test_gemm),
-    'test_m_grouped_gemm_contiguous': ('enumerate_m_grouped_contiguous',   test_fp8_fp4.test_m_grouped_gemm_contiguous),
-    'test_m_grouped_gemm_masked':     ('enumerate_m_grouped_masked',       test_fp8_fp4.test_m_grouped_gemm_masked),
-    'test_k_grouped_gemm_contiguous': ('enumerate_k_grouped_contiguous',   test_fp8_fp4.test_k_grouped_gemm_contiguous),
-}
+def map_index_to_test_alias(index) -> bool:
+    operands = (True, False)
+    return operands[index % 2]
 
+SUITES = {
+    'test_gemm':                      ('enumerate_normal',                             test_fp8_fp4.test_gemm,                      map_index_to_test_alias),
+    'test_m_grouped_gemm_contiguous': ('enumerate_m_grouped_contiguous',               test_fp8_fp4.test_m_grouped_gemm_contiguous, map_index_to_test_alias),
+    'test_m_grouped_gemm_masked':     ('enumerate_m_grouped_masked',                   test_fp8_fp4.test_m_grouped_gemm_masked),
+    'test_k_grouped_gemm_contiguous': ('enumerate_k_grouped_contiguous_with_variants', test_fp8_fp4.test_k_grouped_gemm_contiguous),
+}
 
 def main() -> None:
     args = sys.argv[1:]
@@ -40,10 +43,10 @@ def main() -> None:
         return
 
     name = args[0]
-    enum_name, test_fn = SUITES[name]
+    enum_name, test_fn, map_alias = SUITES[name]
     enum_fn = getattr(test_fp8_fp4, enum_name)
 
-    # Seed before enumerating: enumerate_k_grouped_contiguous draws random ks,
+    # Seed before enumerating: enumerate_k_grouped_contiguous_with_variants draws random ks,
     # and a fixed seed keeps the case list (and thus indices) stable across runs
     torch.manual_seed(0)
     random.seed(0)
@@ -65,7 +68,10 @@ def main() -> None:
     setattr(test_fp8_fp4, enum_name, lambda *a, **kw: iter(selected))
     for i, case in zip(indices, selected):
         print(f'[test_fp8_fp4 {name} #{i}] {case}')
-    test_fn()
+    if map_alias is not None:
+        test_fn(map_alias(int(args[1])))
+    else:
+        test_fn()
     print()
 
 

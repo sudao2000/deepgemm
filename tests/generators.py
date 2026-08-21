@@ -1,5 +1,6 @@
 import enum
 import itertools
+import os
 import random
 import torch
 from typing import Generator, List, Optional, Tuple
@@ -49,14 +50,15 @@ def _fmt_param(v):
 
 
 def print_kernel_io(kernel_name: str, inputs: dict, outputs: dict):
-    print(f' {kernel_name} inputs:')
-    if inputs:
-        for name, value in inputs.items():
-            print(f'   {name} = {_fmt_param(value)}')
-    if outputs and len(inputs) > 0:
-        print(f' {kernel_name} outputs:')
-        for name, value in outputs.items():
-            print(f'   {name} = {_fmt_param(value)}')
+    if not os.getenv('PERFORMANCE'):
+        if inputs:
+            print(f' {kernel_name} inputs:')
+            for name, value in inputs.items():
+                print(f'   {name} = {_fmt_param(value)}')
+        if outputs and not inputs:
+            print(f' {kernel_name} outputs:')
+            for name, value in outputs.items():
+                print(f'   {name} = {_fmt_param(value)}')
     
 
 class QuantConfig:
@@ -224,6 +226,15 @@ def enumerate_k_grouped_contiguous_test_variants(real_ks_cpu: List[int], k_align
             test_real_ks_cpu[0] -= random.randint(1, min(k_alignment - 1, test_real_ks_cpu[0] - 1))
         test_aligned_ks_cpu = [align(k, k_alignment) for k in test_real_ks_cpu]
         yield test_real_ks_cpu, test_aligned_ks_cpu, test_empty_groups, test_k_tail
+
+
+def enumerate_k_grouped_contiguous_with_variants(dtype: torch.dtype, include_k_tail: bool = False):
+    for num_groups, m, n, major_a, major_b, real_ks_cpu, aligned_ks_cpu, expected_k_per_group, gran_k, k_alignment, use_psum_layout in enumerate_k_grouped_contiguous(dtype):
+        for test_real_ks_cpu, test_aligned_ks_cpu, test_empty_groups, test_k_tail in enumerate_k_grouped_contiguous_test_variants(
+                real_ks_cpu, k_alignment, use_psum_layout, include_k_tail):
+            yield (num_groups, m, n, major_a, major_b, real_ks_cpu, aligned_ks_cpu,
+                   test_real_ks_cpu, test_aligned_ks_cpu, expected_k_per_group, gran_k, k_alignment,
+                   use_psum_layout, test_empty_groups, test_k_tail)
 
 
 def enumerate_sf_layout():
