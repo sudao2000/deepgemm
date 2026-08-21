@@ -1,8 +1,8 @@
 import enum
 import itertools
+import os
 import random
 import torch
-import os
 from typing import Generator, List, Optional, Tuple
 
 from deep_gemm.testing import get_arch_major
@@ -50,12 +50,12 @@ def _fmt_param(v):
 
 
 def print_kernel_io(kernel_name: str, inputs: dict, outputs: dict):
-    if os.getenv('PERFORMANCE'):
+    if not os.getenv('PERFORMANCE'):
         if inputs:
             print(f' {kernel_name} inputs:')
             for name, value in inputs.items():
                 print(f'   {name} = {_fmt_param(value)}')
-        if outputs and len(inputs) > 0:
+        if outputs and not inputs:
             print(f' {kernel_name} outputs:')
             for name, value in outputs.items():
                 print(f'   {name} = {_fmt_param(value)}')
@@ -137,9 +137,14 @@ def enumerate_normal(dtype: torch.dtype) -> Generator:
     assert dtype in (torch.float8_e4m3fn, torch.bfloat16)
 
     quant_config_list = QuantConfig.get_list_from_dtype(dtype)
-    # Single small case for fast execution
-    m_fwd, n_fwd, k_fwd = 128, 512, 512
-    m_bwd, n_bwd, k_bwd = 128, 512, 512
+    fp32_output_nk = [(256, 7168), (129280, 7168)]
+    bf16_output_nk = [(2112, 7168), (576, 7168), (24576, 1536), (32768, 512), (7168, 16384), (4096, 7168), (7168, 2048)]
+    m_fwd_list, m_bwd_list = [1, 128, 4096], [4096, ]
+    nk_list = list(bf16_output_nk)
+
+    # Only BF16 GEMM needs FP32 outputs
+    if dtype == torch.bfloat16:
+        nk_list += fp32_output_nk
 
     for kernel_type in get_kernel_types(dtype):
         for quant_config in quant_config_list:
@@ -148,23 +153,32 @@ def enumerate_normal(dtype: torch.dtype) -> Generator:
             reset_seed()
 
             # Forward
-            yield kernel_type, quant_config, m_fwd, n_fwd, k_fwd, MajorTypeAB.KMajor, MajorTypeAB.KMajor, False, torch.bfloat16
+            for m in m_fwd_list:
+                for i in range(len(nk_list)):
+                    n, k = nk_list[i]
+                    out_dtype = torch.bfloat16 if i < len(bf16_output_nk) else torch.float
+                    yield kernel_type, quant_config, m, n, k, MajorTypeAB.KMajor, MajorTypeAB.KMajor, False, out_dtype
+                    # BF16 accumulation: supported on all BF16 GEMMs, and SM100 FP8/FP4 GEMMs
+                    if out_dtype == torch.bfloat16 and (dtype == torch.bfloat16 or get_arch_major() == 10):
+                        yield kernel_type, quant_config, m, n, k, MajorTypeAB.KMajor, MajorTypeAB.KMajor, True, out_dtype
 
             # Backward
-            override_major = MajorTypeAB.MNMajor
-            override_kernel_type = kernel_type
-            if get_arch_major() == 9 and dtype == torch.float8_e4m3fn:
-                override_major = MajorTypeAB.KMajor
-                override_kernel_type = KernelType.Kernel1D1D
-            yield kernel_type,          quant_config, m_bwd, k_bwd, n_bwd, MajorTypeAB.KMajor, override_major, False, torch.bfloat16     # Dgrad
-            yield override_kernel_type, quant_config, n_bwd, m_bwd, k_bwd, override_major,     override_major, False, torch.bfloat16     # Wgrad
+            for m in m_bwd_list:
+                for n, k in nk_list:
+                    override_major = MajorTypeAB.MNMajor
+                    override_kernel_type = kernel_type
+                    if get_arch_major() == 9 and dtype == torch.float8_e4m3fn:
+                        override_major = MajorTypeAB.KMajor
+                        override_kernel_type = KernelType.Kernel1D1D
+                    yield kernel_type,          quant_config, m, k, n, MajorTypeAB.KMajor, override_major, False, torch.bfloat16     # Dgrad
+                    yield override_kernel_type, quant_config, n, m, k, override_major,     override_major, True,  torch.float        # Wgrad
+                    yield override_kernel_type, quant_config, n, m, k, override_major,     override_major, False, torch.bfloat16     # Wgrad
 
 
 def enumerate_m_grouped_contiguous(dtype: torch.dtype) -> Generator:
     quant_config_list = QuantConfig.get_list_from_dtype(dtype)
-    # Single small case for fast execution
-    num_groups, expected_m_per_group = 4, 256
-    n, k = 512, 512
+    m_group_list = [(4, 8192), (8, 4096)]
+    n_k_list = [(6144, 7168), (7168, 3072), (4096, 4096), (4096, 2048)]
     for kernel_type in get_kernel_types(dtype):
         for quant_config in quant_config_list:
             if len(quant_config_list) > 1:
@@ -172,49 +186,56 @@ def enumerate_m_grouped_contiguous(dtype: torch.dtype) -> Generator:
             for use_psum_layout in get_psum_layout_usage():
                 for ensure_zero_padding in ((False, True) if use_psum_layout and get_arch_major() == 10 else (False, )):
                     reset_seed()
-                    for major_a, major_b in get_major_ab(False, get_arch_major() != 9 or dtype != torch.float8_e4m3fn):
-                        yield kernel_type, quant_config, num_groups, expected_m_per_group, n, k, major_a, major_b, use_psum_layout, ensure_zero_padding
+                    for num_groups, expected_m_per_group in m_group_list:
+                        for n, k in n_k_list:
+                            for major_a, major_b in get_major_ab(False, get_arch_major() != 9 or dtype != torch.float8_e4m3fn):
+                                yield kernel_type, quant_config, num_groups, expected_m_per_group, n, k, major_a, major_b, use_psum_layout, ensure_zero_padding
 
 
 def enumerate_m_grouped_masked(dtype: torch.dtype) -> Generator:
     quant_config_list = QuantConfig.get_list_from_dtype(dtype)
-    # Single small case for fast execution
-    max_m = 128
-    num_groups, m = 4, 64
-    n, k = 512, 512
+    max_m = 4096
+    m_group_list = [(32, 192), (6, 1024), (32, 20), (6, 20)]
+    n_k_list = [(6144, 7168), (7168, 3072), (4096, 4096), (4096, 2048)]
     for kernel_type in get_kernel_types(dtype):
         for quant_config in quant_config_list:
             if len(quant_config_list) > 1:
                 quant_config.print()
             for use_psum_layout in get_psum_layout_usage():
                 reset_seed()
-                yield kernel_type, quant_config, num_groups, max_m, m, n, k, use_psum_layout
+                for num_groups, m in m_group_list:
+                    for n, k in n_k_list:
+                        yield kernel_type, quant_config, num_groups, max_m, m, n, k, use_psum_layout
 
 
 def enumerate_k_grouped_contiguous(dtype: torch.dtype):
-    # Single small case for fast execution
     if dtype == torch.bfloat16:
-        k_alignment_options = [(128, 128)] if get_arch_major() == 9 else [(128, 128)]
+        k_alignment_options = [(128, 128)] if get_arch_major() == 9 else [(32, 32), (128, 128), (192, 192)]
     else:
-        k_alignment_options = [(128, 128)] if get_arch_major() == 9 else [(128, 128)]
+        k_alignment_options = [(128, 128)] if get_arch_major() == 9 else [(32, 32), (32, 128), (32, 160), (32, 224), (128, 128), (128, 160), (128, 224)]
     # Only K-major is supported for SM90 FP8
     major_a, major_b = (MajorTypeAB.KMajor, MajorTypeAB.KMajor) if get_arch_major() == 9 and dtype == torch.float8_e4m3fn \
                        else (MajorTypeAB.MNMajor, MajorTypeAB.MNMajor)
     psum_list = (False, True) if get_arch_major() == 10 else (False, )
     # Must with FP32 accumulation and 1D1D kernels
-    num_groups, m, n, expected_k_per_group = 4, 256, 512, 128
-    real_ks_cpu = [max(1, int(expected_k_per_group * random.uniform(0.7, 1.3))) for _ in range(num_groups)]
-    for use_psum_layout in psum_list:
-        for gran_k, k_alignment in k_alignment_options:
-            set_mk_alignment_for_contiguous_layout(k_alignment)
-            aligned_ks_cpu = [align(k, k_alignment) for k in real_ks_cpu]
-            yield num_groups, m, n, major_a, major_b, real_ks_cpu, aligned_ks_cpu, expected_k_per_group, gran_k, k_alignment, use_psum_layout
+    # NOTES: the first shape has many small groups, for stressing the SM90 in-place tensor map update
+    for num_groups, m, n, expected_k_per_group in (( 8,  768, 2048,  128),
+                                                   ( 4, 4096, 7168, 8192), ( 4, 7168, 2048, 8192),   # EP64
+                                                   ( 8, 4096, 7168, 4096), ( 8, 7168, 2048, 4096),   # EP32
+                                                   (16, 4096, 7168, 2048), (16, 7168, 2048, 2048)):  # EP16
+        real_ks_cpu = [max(1, int(expected_k_per_group * random.uniform(0.7, 1.3))) for _ in range(num_groups)]
+        for use_psum_layout in psum_list:
+            for gran_k, k_alignment in k_alignment_options:
+                set_mk_alignment_for_contiguous_layout(k_alignment)
+                aligned_ks_cpu = [align(k, k_alignment) for k in real_ks_cpu]
+                yield num_groups, m, n, major_a, major_b, real_ks_cpu, aligned_ks_cpu, expected_k_per_group, gran_k, k_alignment, use_psum_layout
 
 
 def enumerate_k_grouped_contiguous_test_variants(real_ks_cpu: List[int], k_alignment: int,
                                                  use_psum_layout: bool, include_k_tail: bool = False):
-    # Single variant for fast execution
-    test_variants = [(False, False)]
+    test_variants = [(False, False), (True, False)]
+    if include_k_tail:
+        test_variants.append((False, True))
 
     for test_empty_groups, test_k_tail in test_variants:
         test_real_ks_cpu = list(real_ks_cpu)
@@ -228,24 +249,31 @@ def enumerate_k_grouped_contiguous_test_variants(real_ks_cpu: List[int], k_align
         yield test_real_ks_cpu, test_aligned_ks_cpu, test_empty_groups, test_k_tail
 
 
+def enumerate_k_grouped_contiguous_with_variants(dtype: torch.dtype, include_k_tail: bool = False):
+    for num_groups, m, n, major_a, major_b, real_ks_cpu, aligned_ks_cpu, expected_k_per_group, gran_k, k_alignment, use_psum_layout in enumerate_k_grouped_contiguous(dtype):
+        for test_real_ks_cpu, test_aligned_ks_cpu, test_empty_groups, test_k_tail in enumerate_k_grouped_contiguous_test_variants(
+                real_ks_cpu, k_alignment, use_psum_layout, include_k_tail):
+            yield (num_groups, m, n, major_a, major_b, real_ks_cpu, aligned_ks_cpu,
+                   test_real_ks_cpu, test_aligned_ks_cpu, expected_k_per_group, gran_k, k_alignment,
+                   use_psum_layout, test_empty_groups, test_k_tail)
+
+
 def enumerate_sf_layout():
-    # Single small case for fast execution
-    gran_k_list = (128, ) if get_arch_major() == 9 else (128, )
-    for use_ue8m0 in (False, ):
-        for with_transpose in (True, ):
-            for mn in (512, ):
-                for k in (128, ):
-                    for num_groups in (1, ):
+    gran_k_list = (128, ) if get_arch_major() == 9 else (32, 128)
+    for use_ue8m0 in (False, True):
+        for with_transpose in (True, False):
+            for mn in (4096, 4097, 8192):
+                for k in (128, 7168, 7296):
+                    for num_groups in (1, 2, 4):
                         for gran_k in gran_k_list:
                             set_mk_alignment_for_contiguous_layout(gran_k)
                             yield mn, k, with_transpose, use_ue8m0, num_groups, gran_k
 
 
 def enumerate_k_grouped_sf_layout():
-    # Single small case for fast execution
-    gran_k_list = (128, ) if get_arch_major() == 9 else (128, )
-    for mn in (512, ):
-        for num_groups, avg_k in ((4, 128), ):
+    gran_k_list = (128, ) if get_arch_major() == 9 else (32, 128)
+    for mn in (4096, 7168):
+        for num_groups, avg_k in ((16, 2048), (8, 4096), (72, 384), (128, 256)):
             for gran_k in gran_k_list:
                 set_mk_alignment_for_contiguous_layout(gran_k)
                 ks_cpu = [align(int(random.uniform(0.7, 1.3) * avg_k), gran_k) for _ in range(num_groups)]
@@ -254,8 +282,7 @@ def enumerate_k_grouped_sf_layout():
 
 def enumerate_k_grouped_psum_sf_layout():
     for mn, ks_cpu, num_groups, gran_k in enumerate_k_grouped_sf_layout():
-        # Single alignment for fast execution
-        k_alignment_list = (128, )
+        k_alignment_list = (32, 128, 160, 224)
         for k_alignment in k_alignment_list:
             # Generate non-aligned K sizes to test ceil_div path in pack kernel.
             real_ks_cpu = [k + (gran_k // 2 if i % 2 else 0) for i, k in enumerate(ks_cpu)]
@@ -265,10 +292,9 @@ def enumerate_k_grouped_psum_sf_layout():
 
 
 def enumerate_transpose():
-    # Single small case for fast execution
-    for mn in (64, ):
-        for delta in (0, ):
-            for k in (128, ):
+    for mn in (64, 4096, 16384):
+        for delta in (0, 101, 202, 303):
+            for k in (128, 1024, 4096, 9984, 16384):
                 yield mn + delta, k
 
 
