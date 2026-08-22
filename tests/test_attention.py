@@ -12,6 +12,7 @@ from deep_gemm.testing import (
     test_filter
 )
 from deep_gemm.utils import ceil_div, per_custom_dims_cast_to_fp8, per_token_cast_to_fp4, cast_back_from_fp4, per_token_cast_to_fp8, cast_back_from_fp8
+from deep_gemm.testing.bench import _CudaClosureContext
 
 from generators import generate_normal, get_ue8m0_usage, get_kernel_types, MajorTypeAB, print_kernel_io, to_device
 
@@ -94,20 +95,6 @@ def ref_diff_tol(has_bf16: bool) -> float:
 
 def dtype_tag(dtype: torch.dtype) -> str:
     return 'BF16' if dtype == torch.bfloat16 else 'FP32'
-
-
-def _call_kernel_on_cuda(fn, kwargs: dict):
-    """Move all Tensor values in `kwargs` to CUDA, call `fn(**kwargs)`, then move them back to CPU.
-
-    The return value is also moved to CPU if it is a Tensor. This keeps the test data on CPU
-    except during the actual kernel execution.
-    """
-    for k in list(kwargs.keys()):
-        kwargs[k] = to_device(kwargs[k], 'cuda')
-    out = fn(**kwargs)
-    for k in list(kwargs.keys()):
-        kwargs[k] = to_device(kwargs[k], 'cpu')
-    return out.to('cpu') if isinstance(out, torch.Tensor) else out
 
 
 def ref_fp8_mqa_logits(q: torch.Tensor, kv: torch.Tensor, weights: torch.Tensor,
@@ -234,7 +221,10 @@ def test_mqa_logits():
             kernel_kwargs['max_seqlen_k'] = max_seqlen_k
 
         print_kernel_io('fp8_fp4_mqa_logits', kernel_kwargs, {})
-        logits = _call_kernel_on_cuda(deep_gemm.fp8_fp4_mqa_logits, kernel_kwargs)
+        with _CudaClosureContext(lambda: deep_gemm.fp8_fp4_mqa_logits(**kernel_kwargs),
+                                 tensor_vars=('kernel_kwargs',)):
+            logits = deep_gemm.fp8_fp4_mqa_logits(**kernel_kwargs)
+        logits = logits.to('cpu') if logits.is_cuda else logits
         print_kernel_io('fp8_fp4_mqa_logits', {}, dict(logits=logits))
 
         if compressed_logits:
@@ -243,7 +233,10 @@ def test_mqa_logits():
         else:
             masked_logits = logits
         for _ in range(20):
-            logits_again = _call_kernel_on_cuda(deep_gemm.fp8_fp4_mqa_logits, kernel_kwargs)
+            with _CudaClosureContext(lambda: deep_gemm.fp8_fp4_mqa_logits(**kernel_kwargs),
+                                     tensor_vars=('kernel_kwargs',)):
+                logits_again = deep_gemm.fp8_fp4_mqa_logits(**kernel_kwargs)
+            logits_again = logits_again.to('cpu') if logits_again.is_cuda else logits_again
             if compressed_logits:
                 logits_again = logits_again.masked_fill(~self_mask, 0)
             assert_bitwise_equal(logits_again, masked_logits, 'mqa logits self-consistency')
@@ -492,13 +485,19 @@ def test_paged_mqa_logits():
         )
 
         print_kernel_io('fp8_fp4_paged_mqa_logits', kernel_kwargs, {})
-        logits = _call_kernel_on_cuda(deep_gemm.fp8_fp4_paged_mqa_logits, kernel_kwargs)
+        with _CudaClosureContext(lambda: deep_gemm.fp8_fp4_paged_mqa_logits(**kernel_kwargs),
+                                 tensor_vars=('kernel_kwargs',)):
+            logits = deep_gemm.fp8_fp4_paged_mqa_logits(**kernel_kwargs)
+        logits = logits.to('cpu') if logits.is_cuda else logits
         print_kernel_io('fp8_fp4_paged_mqa_logits', {}, dict(logits=logits))
 
         self_mask = ~ref_neginf_mask
         masked_logits = logits.masked_fill(~self_mask, 0)
         for _ in range(1):# note: original 20 times
-            logits_again = _call_kernel_on_cuda(deep_gemm.fp8_fp4_paged_mqa_logits, kernel_kwargs).masked_fill(~self_mask, 0)
+            with _CudaClosureContext(lambda: deep_gemm.fp8_fp4_paged_mqa_logits(**kernel_kwargs),
+                                     tensor_vars=('kernel_kwargs',)):
+                logits_again = deep_gemm.fp8_fp4_paged_mqa_logits(**kernel_kwargs).masked_fill(~self_mask, 0)
+            logits_again = logits_again.to('cpu') if logits_again.is_cuda else logits_again
             assert_bitwise_equal(logits_again, masked_logits, 'paged mqa logits self-consistency')
 
         # Validation
