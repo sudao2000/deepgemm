@@ -115,7 +115,6 @@ def test_m_grouped_gemm_contiguous(test_alias: bool) -> None:
 
             # noinspection PyShadowingNames
             def test_func():
-                (a, b, d, grouped_layout) = to_device((a, b, d, grouped_layout), 'cuda')
                 deep_gemm.m_grouped_bf16_gemm_nt_contiguous(a, b, d, grouped_layout, use_psum_layout=use_psum_layout,
                                                             ensure_zero_padding=ensure_zero_padding)
 
@@ -153,7 +152,6 @@ def test_m_grouped_gemm_masked() -> None:
 
             # noinspection PyShadowingNames
             def test_func():
-                (a, b, d, masked_m, a_psum, d_psum, psum_m) = to_device((a, b, d, masked_m, a_psum, d_psum, psum_m), 'cuda')
                 if use_psum_layout:
                     print_kernel_io('m_grouped_bf16_gemm_nt_contiguous',
                                     dict(a=a_psum, b=b, grouped_layout=psum_m,
@@ -266,7 +264,6 @@ def test_k_grouped_gemm_contiguous() -> None:
 
             # noinspection PyShadowingNames
             def test_func():
-                (a, b, d, aligned_ks_cpu, grouped_layout, c) = to_device((a, b, d, aligned_ks_cpu, grouped_layout, c), 'cuda')
                 deep_gemm.k_grouped_bf16_gemm_tn_contiguous(a, b, d, aligned_ks_cpu, grouped_layout, c, use_psum_layout=use_psum_layout)
 
             t = bench_kineto(test_func, 'bf16_gemm',
