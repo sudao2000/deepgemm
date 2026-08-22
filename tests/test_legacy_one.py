@@ -73,7 +73,8 @@ def main() -> None:
     setattr(test_legacy, enum_name, lambda *a, **kw: iter(selected))
     for i, case in zip(indices, selected):
         print(f'[test_legacy {name} #{i}] {case}')
-    test_fn(mapping_fn(int(args[1])))
+    
+    test_fn(*mapping_fn(int(args[1])))
     print()
 
 

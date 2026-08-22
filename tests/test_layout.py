@@ -69,7 +69,7 @@ def test_sf_layout_kernels() -> None:
             impl, name = get_mn_major_tma_aligned_tensor, 'transpose'
             print_kernel_io('get_mn_major_tma_aligned_tensor', dict(fp32_sf=fp32_sf), {})
             with _CudaClosureContext(lambda: impl(fp32_sf), tensor_vars=('fp32_sf',)):
-                transposed_sf = impl(fp32_sf)
+                transposed_sf = impl(fp32_sf).to('cpu')
             print_kernel_io('get_mn_major_tma_aligned_tensor', {}, dict(transposed_sf=transposed_sf))
             tma_aligned_mn, sf_k = get_tma_aligned_size(mn, fp32_sf.element_size()), ceil_div(k, gran_k)
             if num_groups > 1:

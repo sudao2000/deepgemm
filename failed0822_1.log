@@ -1,0 +1,568 @@
+root@0d2d2155d5fb:/workspace/deepgemm# ./run_one_0.sh | tee  correct.log
+[test_attention test_gemm_skip_head_mid #0] (<KernelType.Kernel1D2D: 1>, 128, 32768, 512)
+Testing GEMM skip head mid:
+ fp8_gemm_nt_skip_head_mid inputs:
+   a = (Tensor(shape=(128, 512), dtype=torch.float8_e4m3fn), Tensor(shape=(128, 4), dtype=torch.float32))
+   b = (Tensor(shape=(32768, 512), dtype=torch.float8_e4m3fn), Tensor(shape=(256, 4), dtype=torch.float32))
+   d = Tensor(shape=(128, 40960), dtype=torch.bfloat16)
+   head_splits = (128, 64, 128)
+   disable_ue8m0_cast = True
+Warning: please use at least NVCC 12.9 for the best DeepGEMM performance
+ fp8_gemm_nt_skip_head_mid outputs:
+   d = Tensor(shape=(128, 40960), dtype=torch.bfloat16)
+
+
+[test_attention test_mqa_logits #0] ('fp8', torch.bfloat16, torch.float32, False, True, 2048, 8192, 32, 32, False)
+Testing FP8/MXFP4/MXFP8 MQA Logits:
+ > prefill: running 1/1 cases
+ fp8_fp4_mqa_logits inputs:
+   q = (Tensor(shape=(2048, 32, 32), dtype=torch.float8_e4m3fn), None)
+   kv = (Tensor(shape=(8192, 32), dtype=torch.float8_e4m3fn), Tensor(shape=(8192,), dtype=torch.float32))
+   weights = Tensor(shape=(2048, 32), dtype=torch.float32)
+   cu_seq_len_k_start = Tensor(shape=(2048,), dtype=torch.int32)
+   cu_seq_len_k_end = Tensor(shape=(2048,), dtype=torch.int32)
+   clean_logits = True
+   max_seqlen_k = 0
+   logits_dtype = torch.bfloat16
+Warning: please use at least NVCC 12.9 for the best DeepGEMM performance
+ fp8_fp4_mqa_logits outputs:
+   logits = Tensor(shape=(2048, 8192), dtype=torch.bfloat16)
+
+
+[test_attention test_paged_mqa_logits #0] (False, 'fp8', torch.bfloat16, torch.float32, 64, True, False, 256, 1, 1, 32, 128, 8192)
+Testing FP8/MXFP4/MXFP8 Paged MQA Logits:
+ > paged: running 1/1 cases
+Warning: please use at least NVCC 12.9 for the best DeepGEMM performance
+ fp8_fp4_paged_mqa_logits inputs:
+   q = (Tensor(shape=(256, 1, 32, 128), dtype=torch.float8_e4m3fn), None)
+   kv_cache = Tensor(shape=(32857, 64, 1, 132), dtype=torch.uint8)
+   weights = Tensor(shape=(256, 32), dtype=torch.float32)
+   context_lens = Tensor(shape=(256, 1), dtype=torch.int32)
+   block_table = Tensor(shape=(256, 167), dtype=torch.int32)
+   schedule_meta = Tensor(shape=(133, 2), dtype=torch.int32)
+   max_context_len = 10688
+   clean_logits = False
+   logits_dtype = torch.bfloat16
+   indices = None
+Traceback (most recent call last):
+  File "/workspace/deepgemm/tests/test_attention_one.py", line 63, in <module>
+    main()
+  File "/workspace/deepgemm/tests/test_attention_one.py", line 58, in main
+    test_fn()
+  File "/workspace/deepgemm/tests/test_attention.py", line 495, in test_paged_mqa_logits
+    logits = _call_kernel_on_cuda(deep_gemm.fp8_fp4_paged_mqa_logits, kernel_kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/deepgemm/tests/test_attention.py", line 106, in _call_kernel_on_cuda
+    kwargs[k] = to_device(kwargs[k], 'cuda')
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/deepgemm/tests/generators.py", line 552, in to_device
+    return tuple(to_device(item, device) for item in obj)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/deepgemm/tests/generators.py", line 552, in <genexpr>
+    return tuple(to_device(item, device) for item in obj)
+                 ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/deepgemm/tests/generators.py", line 550, in to_device
+    return obj.to(device)
+           ^^^^^^^^^^^^^^
+torch.AcceleratorError: CUDA error: an illegal memory access was encountered
+CUDA kernel errors might be asynchronously reported at some other API call, so the stacktrace below might be incorrect.
+For debugging consider passing CUDA_LAUNCH_BLOCKING=1
+Compile with `TORCH_USE_CUDA_DSA` to enable device-side assertions. sudao
+
+[test_bf16 test_gemm #0] (<KernelType.KernelNoSF: 2>, None, 128, 512, 512, <MajorTypeAB.KMajor: 0>, <MajorTypeAB.KMajor: 0>, False, torch.bfloat16)
+Testing GEMM:
+ bf16_gemm_nt inputs:
+   a = Tensor(shape=(128, 512), dtype=torch.bfloat16)
+   b = Tensor(shape=(512, 512), dtype=torch.bfloat16)
+   c = None
+Warning: please use at least NVCC 12.9 for the best DeepGEMM performance
+NVCC compilation failed: In file included from /root/.deep_gemm/tmp/1702-47736086-caba4566-ac2bf895/kernel.cu:3:
+/workspace/deepgemm/deep_gemm/include/deep_gemm/impls/sm90_bf16_gemm.cuh:396:109: error: extended character 。 is not valid in an identifier
+  396 | `deep_gemm/include/deep_gemm/impls/sm90_bf16_gemm.cuh` 实现了 Hopper（SM90）架构上 BF16 矩阵乘法的核心 CUDA kernel。下面按文件结构逐段、逐行解释。
+      |                                                                                                             ^
+/workspace/deepgemm/deep_gemm/include/deep_gemm/impls/sm90_bf16_gemm.cuh:396:109: error: extended character 、 is not valid in an identifier
+/workspace/deepgemm/deep_gemm/include/deep_gemm/impls/sm90_bf16_gemm.cuh:396:109: error: extended character 。 is not valid in an identifier
+/workspace/deepgemm/deep_gemm/include/deep_gemm/impls/sm90_bf16_gemm.cuh:405:1: error: extended character 。 is not valid in an identifier
+  405 | 标准头文件保护，防止重复包含。
+      | ^
+/workspace/deepgemm/deep_gemm/include/deep_gemm/impls/sm90_bf16_gemm.cuh:411:16: error: extended character “ is not valid in an identifier
+  411 | 保存当前 clang 诊断状态，并忽略“未知属性”警告。CUDA 的 `__grid_constant__` 等属性在 clang 编译时可能会触发此警告，这里选择静默。
+      |                ^
+/workspace/deepgemm/deep_gemm/include/deep_gemm/impls/sm90_bf16_gemm.cuh:411:16: error: extended character ” is not valid in an identifier
+/workspace/deepgemm/deep_gemm/include/deep_gemm/impls/sm90_bf16_gemm.cuh:411:16: error: extended character 。 is not valid in an identifier
+/workspace/deepgemm/deep_gemm/include/deep_gemm/impls/sm90_bf16_gemm.cuh:411:91: error: extended character 。 is not valid in an identifier
+  411 | 保存当前 clang 诊断状态，并忽略“未知属性”警告。CUDA 的 `__grid_constant__` 等属性在 clang 编译时可能会触发此警告，这里选择静默。
+      |                                                                                           ^
+/workspace/deepgemm/deep_gemm/include/deep_gemm/impls/sm90_bf16_gemm.cuh:417:38: error: extended character 。 is not valid in an identifier
+  417 | - `barrier.h`：CUTLASS 的 mbarrier / 命名屏障实现。
+      |                                      ^
+/workspace/deepgemm/deep_gemm/include/deep_gemm/impls/sm90_bf16_gemm.cuh:418:105: error: extended character 。 is not valid in an identifier
+  418 | - `reg_reconfig.h`：warp group 级别的寄存器重新分配接口（`warpgroup_reg_alloc` / `warpgroup_reg_dealloc`）。
+      |                                                                                                         ^
+/workspace/deepgemm/deep_gemm/include/deep_gemm/impls/sm90_bf16_gemm.cuh:426:27: error: extended character 。 is not valid in an identifier
+  426 | - `cluster_sm90.hpp`：CTA 集群（cluster）同步原语。
+      |                           ^
+/workspace/deepgemm/deep_gemm/include/deep_gemm/impls/sm90_bf16_gemm.cuh:427:69: error: extended character 。 is not valid in an identifier
+  427 | - `copy_sm90_desc.hpp` / `copy_sm90_tma.hpp`：TMA 描述符与 TMA copy 指令封装。
+      |                                                                     ^
+/workspace/deepgemm/deep_gemm/include/deep_gemm/impls/sm90_bf16_gemm.cuh:428:58: error: extended character 。 is not valid in an identifier
+  428 | - `mma_sm100_desc.hpp`：WGMMA 描述符相关类型（虽然名字带 sm100，但这里用于描述符构造）。
+      |                                                          ^
+/workspace/deepgemm/deep_gemm/include/deep_gemm/impls/sm90_bf16_gemm.cuh:444:21: error: extended character 。 is not valid in an identifier
+  444 | - `comm/barrier.cuh`：集群级同步封装。
+      |                     ^
+/workspace/deepgemm/deep_gemm/include/deep_gemm/impls/sm90_bf16_gemm.cuh:445:48: error: extended character 、 is not valid in an identifier
+  445 | - `common/math.cuh` / `utils.cuh` / `types.cuh`：数学工具、类型别名、通用辅助。
+      |                                                ^
+/workspace/deepgemm/deep_gemm/include/deep_gemm/impls/sm90_bf16_gemm.cuh:445:48: error: extended character 、 is not valid in an identifier
+/workspace/deepgemm/deep_gemm/include/deep_gemm/impls/sm90_bf16_gemm.cuh:445:48: error: extended character 。 is not valid in an identifier
+/workspace/deepgemm/deep_gemm/include/deep_gemm/impls/sm90_bf16_gemm.cuh:446:46: error: extended character 。 is not valid in an identifier
+  446 | - `common/tma_copy.cuh`：项目自己的 TMA copy 封装。
+      |                                              ^
+/workspace/deepgemm/deep_gemm/include/deep_gemm/impls/sm90_bf16_gemm.cuh:447:30: error: extended character 。 is not valid in an identifier
+  447 | - `mma/sm90.cuh`：SM90 WGMMA 描述符构造与选择器。
+      |                              ^
+/workspace/deepgemm/deep_gemm/include/deep_gemm/impls/sm90_bf16_gemm.cuh:448:42: error: extended character 、 is not valid in an identifier
+  448 | - `epilogue/transform.cuh`：输出变换（如 swizzling、类型转换）。
+      |                                          ^
+/workspace/deepgemm/deep_gemm/include/deep_gemm/impls/sm90_bf16_gemm.cuh:448:42: error: extended character 。 is not valid in an identifier
+/workspace/deepgemm/deep_gemm/include/deep_gemm/impls/sm90_bf16_gemm.cuh:449:71: error: extended character 、 is not valid in an identifier
+  449 | - `ptx/ld_st.cuh` / `utils.cuh` / `wgmma.cuh`：PTX 内联汇编函数（加载/存储、WGMMA fence、操作数 fence）。
+      |                                                                       ^
+/workspace/deepgemm/deep_gemm/include/deep_gemm/impls/sm90_bf16_gemm.cuh:449:83: error: extended character 、 is not valid in an identifier
+  449 | - `ptx/ld_st.cuh` / `utils.cuh` / `wgmma.cuh`：PTX 内联汇编函数（加载/存储、WGMMA fence、操作数 fence）。
+      |                                                                                   ^
+/workspace/deepgemm/deep_gemm/include/deep_gemm/impls/sm90_bf16_gemm.cuh:449:97: error: extended character 。 is not valid in an identifier
+  449 | - `ptx/ld_st.cuh` / `utils.cuh` / `wgmma.cuh`：PTX 内联汇编函数（加载/存储、WGMMA fence、操作数 fence）。
+      |                                                                                                 ^
+/workspace/deepgemm/deep_gemm/include/deep_gemm/impls/sm90_bf16_gemm.cuh:450:52: error: extended character 。 is not valid in an identifier
+  450 | - `scheduler/gemm.cuh`：block 调度器，决定当前 CTA 计算哪个输出块。
+      |                                                    ^
+/workspace/deepgemm/deep_gemm/include/deep_gemm/impls/sm90_bf16_gemm.cuh:455:18: error: extended character 。 is not valid in an identifier
+  455 | 进入 `deep_gemm` 命名空间。
+      |                  ^
+
+Traceback (most recent call last):
+  File "/workspace/deepgemm/tests/test_bf16_one.py", line 80, in <module>
+    main()
+  File "/workspace/deepgemm/tests/test_bf16_one.py", line 73, in main
+    test_fn(map_test_alias(int(args[1])))
+  File "/workspace/deepgemm/tests/test_bf16.py", line 45, in test_gemm
+    getattr(deep_gemm, func_name)(a, b, d, c=c)
+RuntimeError: Assertion error (csrc/apis/../jit_kernels/impls/../../jit/compiler.hpp:228): false and "NVCC compilation failed"
+[test_bf16 test_m_grouped_gemm_contiguous #0] (<KernelType.KernelNoSF: 2>, None, 4, 256, 512, 512, <MajorTypeAB.KMajor: 0>, <MajorTypeAB.KMajor: 0>, True, False)
+Testing m-grouped contiguous GEMM:
+ m_grouped_bf16_gemm_nt_contiguous inputs:
+   a = Tensor(shape=(1280, 512), dtype=torch.bfloat16)
+   b = Tensor(shape=(4, 512, 512), dtype=torch.bfloat16)
+   grouped_layout = Tensor(shape=(4,), dtype=torch.int32)
+   use_psum_layout = True
+   ensure_zero_padding = False
+Warning: please use at least NVCC 12.9 for the best DeepGEMM performance
+NVCC compilation failed: In file included from /root/.deep_gemm/tmp/1842-2cc68ed5-95714331-10d1c168/kernel.cu:3:
+/workspace/deepgemm/deep_gemm/include/deep_gemm/impls/sm90_bf16_gemm.cuh:396:109: error: extended character 。 is not valid in an identifier
+  396 | `deep_gemm/include/deep_gemm/impls/sm90_bf16_gemm.cuh` 实现了 Hopper（SM90）架构上 BF16 矩阵乘法的核心 CUDA kernel。下面按文件结构逐段、逐行解释。
+      |                                                                                                             ^
+/workspace/deepgemm/deep_gemm/include/deep_gemm/impls/sm90_bf16_gemm.cuh:396:109: error: extended character 、 is not valid in an identifier
+/workspace/deepgemm/deep_gemm/include/deep_gemm/impls/sm90_bf16_gemm.cuh:396:109: error: extended character 。 is not valid in an identifier
+/workspace/deepgemm/deep_gemm/include/deep_gemm/impls/sm90_bf16_gemm.cuh:405:1: error: extended character 。 is not valid in an identifier
+  405 | 标准头文件保护，防止重复包含。
+      | ^
+/workspace/deepgemm/deep_gemm/include/deep_gemm/impls/sm90_bf16_gemm.cuh:411:16: error: extended character “ is not valid in an identifier
+  411 | 保存当前 clang 诊断状态，并忽略“未知属性”警告。CUDA 的 `__grid_constant__` 等属性在 clang 编译时可能会触发此警告，这里选择静默。
+      |                ^
+/workspace/deepgemm/deep_gemm/include/deep_gemm/impls/sm90_bf16_gemm.cuh:411:16: error: extended character ” is not valid in an identifier
+/workspace/deepgemm/deep_gemm/include/deep_gemm/impls/sm90_bf16_gemm.cuh:411:16: error: extended character 。 is not valid in an identifier
+/workspace/deepgemm/deep_gemm/include/deep_gemm/impls/sm90_bf16_gemm.cuh:411:91: error: extended character 。 is not valid in an identifier
+  411 | 保存当前 clang 诊断状态，并忽略“未知属性”警告。CUDA 的 `__grid_constant__` 等属性在 clang 编译时可能会触发此警告，这里选择静默。
+      |                                                                                           ^
+/workspace/deepgemm/deep_gemm/include/deep_gemm/impls/sm90_bf16_gemm.cuh:417:38: error: extended character 。 is not valid in an identifier
+  417 | - `barrier.h`：CUTLASS 的 mbarrier / 命名屏障实现。
+      |                                      ^
+/workspace/deepgemm/deep_gemm/include/deep_gemm/impls/sm90_bf16_gemm.cuh:418:105: error: extended character 。 is not valid in an identifier
+  418 | - `reg_reconfig.h`：warp group 级别的寄存器重新分配接口（`warpgroup_reg_alloc` / `warpgroup_reg_dealloc`）。
+      |                                                                                                         ^
+/workspace/deepgemm/deep_gemm/include/deep_gemm/impls/sm90_bf16_gemm.cuh:426:27: error: extended character 。 is not valid in an identifier
+  426 | - `cluster_sm90.hpp`：CTA 集群（cluster）同步原语。
+      |                           ^
+/workspace/deepgemm/deep_gemm/include/deep_gemm/impls/sm90_bf16_gemm.cuh:427:69: error: extended character 。 is not valid in an identifier
+  427 | - `copy_sm90_desc.hpp` / `copy_sm90_tma.hpp`：TMA 描述符与 TMA copy 指令封装。
+      |                                                                     ^
+/workspace/deepgemm/deep_gemm/include/deep_gemm/impls/sm90_bf16_gemm.cuh:428:58: error: extended character 。 is not valid in an identifier
+  428 | - `mma_sm100_desc.hpp`：WGMMA 描述符相关类型（虽然名字带 sm100，但这里用于描述符构造）。
+      |                                                          ^
+/workspace/deepgemm/deep_gemm/include/deep_gemm/impls/sm90_bf16_gemm.cuh:444:21: error: extended character 。 is not valid in an identifier
+  444 | - `comm/barrier.cuh`：集群级同步封装。
+      |                     ^
+/workspace/deepgemm/deep_gemm/include/deep_gemm/impls/sm90_bf16_gemm.cuh:445:48: error: extended character 、 is not valid in an identifier
+  445 | - `common/math.cuh` / `utils.cuh` / `types.cuh`：数学工具、类型别名、通用辅助。
+      |                                                ^
+/workspace/deepgemm/deep_gemm/include/deep_gemm/impls/sm90_bf16_gemm.cuh:445:48: error: extended character 、 is not valid in an identifier
+/workspace/deepgemm/deep_gemm/include/deep_gemm/impls/sm90_bf16_gemm.cuh:445:48: error: extended character 。 is not valid in an identifier
+/workspace/deepgemm/deep_gemm/include/deep_gemm/impls/sm90_bf16_gemm.cuh:446:46: error: extended character 。 is not valid in an identifier
+  446 | - `common/tma_copy.cuh`：项目自己的 TMA copy 封装。
+      |                                              ^
+/workspace/deepgemm/deep_gemm/include/deep_gemm/impls/sm90_bf16_gemm.cuh:447:30: error: extended character 。 is not valid in an identifier
+  447 | - `mma/sm90.cuh`：SM90 WGMMA 描述符构造与选择器。
+      |                              ^
+/workspace/deepgemm/deep_gemm/include/deep_gemm/impls/sm90_bf16_gemm.cuh:448:42: error: extended character 、 is not valid in an identifier
+  448 | - `epilogue/transform.cuh`：输出变换（如 swizzling、类型转换）。
+      |                                          ^
+/workspace/deepgemm/deep_gemm/include/deep_gemm/impls/sm90_bf16_gemm.cuh:448:42: error: extended character 。 is not valid in an identifier
+/workspace/deepgemm/deep_gemm/include/deep_gemm/impls/sm90_bf16_gemm.cuh:449:71: error: extended character 、 is not valid in an identifier
+  449 | - `ptx/ld_st.cuh` / `utils.cuh` / `wgmma.cuh`：PTX 内联汇编函数（加载/存储、WGMMA fence、操作数 fence）。
+      |                                                                       ^
+/workspace/deepgemm/deep_gemm/include/deep_gemm/impls/sm90_bf16_gemm.cuh:449:83: error: extended character 、 is not valid in an identifier
+  449 | - `ptx/ld_st.cuh` / `utils.cuh` / `wgmma.cuh`：PTX 内联汇编函数（加载/存储、WGMMA fence、操作数 fence）。
+      |                                                                                   ^
+/workspace/deepgemm/deep_gemm/include/deep_gemm/impls/sm90_bf16_gemm.cuh:449:97: error: extended character 。 is not valid in an identifier
+  449 | - `ptx/ld_st.cuh` / `utils.cuh` / `wgmma.cuh`：PTX 内联汇编函数（加载/存储、WGMMA fence、操作数 fence）。
+      |                                                                                                 ^
+/workspace/deepgemm/deep_gemm/include/deep_gemm/impls/sm90_bf16_gemm.cuh:450:52: error: extended character 。 is not valid in an identifier
+  450 | - `scheduler/gemm.cuh`：block 调度器，决定当前 CTA 计算哪个输出块。
+      |                                                    ^
+/workspace/deepgemm/deep_gemm/include/deep_gemm/impls/sm90_bf16_gemm.cuh:455:18: error: extended character 。 is not valid in an identifier
+  455 | 进入 `deep_gemm` 命名空间。
+      |                  ^
+
+Traceback (most recent call last):
+  File "/workspace/deepgemm/tests/test_bf16_one.py", line 80, in <module>
+    main()
+  File "/workspace/deepgemm/tests/test_bf16_one.py", line 73, in main
+    test_fn(map_test_alias(int(args[1])))
+  File "/workspace/deepgemm/tests/test_bf16.py", line 96, in test_m_grouped_gemm_contiguous
+    getattr(deep_gemm, func_name)(a, b, d, grouped_layout, use_psum_layout=use_psum_layout,
+RuntimeError: Assertion error (csrc/apis/../jit_kernels/impls/../../jit/compiler.hpp:228): false and "NVCC compilation failed"
+Traceback (most recent call last):
+  File "/workspace/deepgemm/tests/test_bf16_one.py", line 80, in <module>
+    main()
+  File "/workspace/deepgemm/tests/test_bf16_one.py", line 49, in main
+    enum_name, test_fn, map_test_alias = SUITES[name]
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ValueError: not enough values to unpack (expected 3, got 2)
+Traceback (most recent call last):
+  File "/workspace/deepgemm/tests/test_bf16_one.py", line 80, in <module>
+    main()
+  File "/workspace/deepgemm/tests/test_bf16_one.py", line 49, in main
+    enum_name, test_fn, map_test_alias = SUITES[name]
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ValueError: not enough values to unpack (expected 3, got 2)
+Traceback (most recent call last):
+  File "/workspace/deepgemm/tests/test_bf16_one.py", line 80, in <module>
+    main()
+  File "/workspace/deepgemm/tests/test_bf16_one.py", line 49, in main
+    enum_name, test_fn, map_test_alias = SUITES[name]
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ValueError: not enough values to unpack (expected 3, got 2)
+[test_einsum test_bmk_bnk_mn #0] (129, 128, 384, 128, torch.float32)
+Testing "bmk, bnk -> mn":
+ einsum inputs:
+   equation = 'bmk,bnk->mn'
+   a = Tensor(shape=(129, 128, 128), dtype=torch.bfloat16)
+   b = Tensor(shape=(129, 384, 128), dtype=torch.bfloat16)
+   c = Tensor(shape=(128, 384), dtype=torch.float32)
+Traceback (most recent call last):
+  File "/workspace/deepgemm/tests/test_einsum_one.py", line 70, in <module>
+    main()
+  File "/workspace/deepgemm/tests/test_einsum_one.py", line 65, in main
+    test_fn()
+  File "/workspace/deepgemm/tests/test_einsum.py", line 53, in test_bmk_bnk_mn
+    deep_gemm.einsum('bmk,bnk->mn', a, b, d, c=c)
+RuntimeError: Assertion error (csrc/apis/einsum.hpp:27): c->data_ptr() == d.data_ptr() and c->sizes() == d.sizes() and c->strides() == d.strides()
+[test_einsum test_bhr_hdr_bhd #0] (128, 512, 128, 4)
+Testing "bhr, hdr -> bhd":
+ einsum inputs:
+   equation = 'bhr,hdr->bhd'
+   a = Tensor(shape=(4, 128, 512), dtype=torch.bfloat16)
+   b = Tensor(shape=(128, 128, 512), dtype=torch.bfloat16)
+Warning: please use at least NVCC 12.9 for the best DeepGEMM performance
+NVCC compilation failed: In file included from /root/.deep_gemm/tmp/2306-6e7511b8-cdef9135-a8a06f64/kernel.cu:3:
+/workspace/deepgemm/deep_gemm/include/deep_gemm/impls/sm90_bf16_gemm.cuh:396:109: error: extended character 。 is not valid in an identifier
+  396 | `deep_gemm/include/deep_gemm/impls/sm90_bf16_gemm.cuh` 实现了 Hopper（SM90）架构上 BF16 矩阵乘法的核心 CUDA kernel。下面按文件结构逐段、逐行解释。
+      |                                                                                                             ^
+/workspace/deepgemm/deep_gemm/include/deep_gemm/impls/sm90_bf16_gemm.cuh:396:109: error: extended character 、 is not valid in an identifier
+/workspace/deepgemm/deep_gemm/include/deep_gemm/impls/sm90_bf16_gemm.cuh:396:109: error: extended character 。 is not valid in an identifier
+/workspace/deepgemm/deep_gemm/include/deep_gemm/impls/sm90_bf16_gemm.cuh:405:1: error: extended character 。 is not valid in an identifier
+  405 | 标准头文件保护，防止重复包含。
+      | ^
+/workspace/deepgemm/deep_gemm/include/deep_gemm/impls/sm90_bf16_gemm.cuh:411:16: error: extended character “ is not valid in an identifier
+  411 | 保存当前 clang 诊断状态，并忽略“未知属性”警告。CUDA 的 `__grid_constant__` 等属性在 clang 编译时可能会触发此警告，这里选择静默。
+      |                ^
+/workspace/deepgemm/deep_gemm/include/deep_gemm/impls/sm90_bf16_gemm.cuh:411:16: error: extended character ” is not valid in an identifier
+/workspace/deepgemm/deep_gemm/include/deep_gemm/impls/sm90_bf16_gemm.cuh:411:16: error: extended character 。 is not valid in an identifier
+/workspace/deepgemm/deep_gemm/include/deep_gemm/impls/sm90_bf16_gemm.cuh:411:91: error: extended character 。 is not valid in an identifier
+  411 | 保存当前 clang 诊断状态，并忽略“未知属性”警告。CUDA 的 `__grid_constant__` 等属性在 clang 编译时可能会触发此警告，这里选择静默。
+      |                                                                                           ^
+/workspace/deepgemm/deep_gemm/include/deep_gemm/impls/sm90_bf16_gemm.cuh:417:38: error: extended character 。 is not valid in an identifier
+  417 | - `barrier.h`：CUTLASS 的 mbarrier / 命名屏障实现。
+      |                                      ^
+/workspace/deepgemm/deep_gemm/include/deep_gemm/impls/sm90_bf16_gemm.cuh:418:105: error: extended character 。 is not valid in an identifier
+  418 | - `reg_reconfig.h`：warp group 级别的寄存器重新分配接口（`warpgroup_reg_alloc` / `warpgroup_reg_dealloc`）。
+      |                                                                                                         ^
+/workspace/deepgemm/deep_gemm/include/deep_gemm/impls/sm90_bf16_gemm.cuh:426:27: error: extended character 。 is not valid in an identifier
+  426 | - `cluster_sm90.hpp`：CTA 集群（cluster）同步原语。
+      |                           ^
+/workspace/deepgemm/deep_gemm/include/deep_gemm/impls/sm90_bf16_gemm.cuh:427:69: error: extended character 。 is not valid in an identifier
+  427 | - `copy_sm90_desc.hpp` / `copy_sm90_tma.hpp`：TMA 描述符与 TMA copy 指令封装。
+      |                                                                     ^
+/workspace/deepgemm/deep_gemm/include/deep_gemm/impls/sm90_bf16_gemm.cuh:428:58: error: extended character 。 is not valid in an identifier
+  428 | - `mma_sm100_desc.hpp`：WGMMA 描述符相关类型（虽然名字带 sm100，但这里用于描述符构造）。
+      |                                                          ^
+/workspace/deepgemm/deep_gemm/include/deep_gemm/impls/sm90_bf16_gemm.cuh:444:21: error: extended character 。 is not valid in an identifier
+  444 | - `comm/barrier.cuh`：集群级同步封装。
+      |                     ^
+/workspace/deepgemm/deep_gemm/include/deep_gemm/impls/sm90_bf16_gemm.cuh:445:48: error: extended character 、 is not valid in an identifier
+  445 | - `common/math.cuh` / `utils.cuh` / `types.cuh`：数学工具、类型别名、通用辅助。
+      |                                                ^
+/workspace/deepgemm/deep_gemm/include/deep_gemm/impls/sm90_bf16_gemm.cuh:445:48: error: extended character 、 is not valid in an identifier
+/workspace/deepgemm/deep_gemm/include/deep_gemm/impls/sm90_bf16_gemm.cuh:445:48: error: extended character 。 is not valid in an identifier
+/workspace/deepgemm/deep_gemm/include/deep_gemm/impls/sm90_bf16_gemm.cuh:446:46: error: extended character 。 is not valid in an identifier
+  446 | - `common/tma_copy.cuh`：项目自己的 TMA copy 封装。
+      |                                              ^
+/workspace/deepgemm/deep_gemm/include/deep_gemm/impls/sm90_bf16_gemm.cuh:447:30: error: extended character 。 is not valid in an identifier
+  447 | - `mma/sm90.cuh`：SM90 WGMMA 描述符构造与选择器。
+      |                              ^
+/workspace/deepgemm/deep_gemm/include/deep_gemm/impls/sm90_bf16_gemm.cuh:448:42: error: extended character 、 is not valid in an identifier
+  448 | - `epilogue/transform.cuh`：输出变换（如 swizzling、类型转换）。
+      |                                          ^
+/workspace/deepgemm/deep_gemm/include/deep_gemm/impls/sm90_bf16_gemm.cuh:448:42: error: extended character 。 is not valid in an identifier
+/workspace/deepgemm/deep_gemm/include/deep_gemm/impls/sm90_bf16_gemm.cuh:449:71: error: extended character 、 is not valid in an identifier
+  449 | - `ptx/ld_st.cuh` / `utils.cuh` / `wgmma.cuh`：PTX 内联汇编函数（加载/存储、WGMMA fence、操作数 fence）。
+      |                                                                       ^
+/workspace/deepgemm/deep_gemm/include/deep_gemm/impls/sm90_bf16_gemm.cuh:449:83: error: extended character 、 is not valid in an identifier
+  449 | - `ptx/ld_st.cuh` / `utils.cuh` / `wgmma.cuh`：PTX 内联汇编函数（加载/存储、WGMMA fence、操作数 fence）。
+      |                                                                                   ^
+/workspace/deepgemm/deep_gemm/include/deep_gemm/impls/sm90_bf16_gemm.cuh:449:97: error: extended character 。 is not valid in an identifier
+  449 | - `ptx/ld_st.cuh` / `utils.cuh` / `wgmma.cuh`：PTX 内联汇编函数（加载/存储、WGMMA fence、操作数 fence）。
+      |                                                                                                 ^
+/workspace/deepgemm/deep_gemm/include/deep_gemm/impls/sm90_bf16_gemm.cuh:450:52: error: extended character 。 is not valid in an identifier
+  450 | - `scheduler/gemm.cuh`：block 调度器，决定当前 CTA 计算哪个输出块。
+      |                                                    ^
+/workspace/deepgemm/deep_gemm/include/deep_gemm/impls/sm90_bf16_gemm.cuh:455:18: error: extended character 。 is not valid in an identifier
+  455 | 进入 `deep_gemm` 命名空间。
+      |                  ^
+
+Traceback (most recent call last):
+  File "/workspace/deepgemm/tests/test_einsum_one.py", line 70, in <module>
+    main()
+  File "/workspace/deepgemm/tests/test_einsum_one.py", line 65, in main
+    test_fn()
+  File "/workspace/deepgemm/tests/test_einsum.py", line 81, in test_bhr_hdr_bhd
+    deep_gemm.einsum('bhr,hdr->bhd', x, y, z)
+RuntimeError: Assertion error (csrc/apis/../jit_kernels/impls/../../jit/compiler.hpp:228): false and "NVCC compilation failed"
+[test_einsum test_bhd_hdr_bhr #0] (128, 512, 128, 4)
+Testing "bhd, hdr -> bhr":
+ einsum inputs:
+   equation = 'bhd,hdr->bhr'
+   a = Tensor(shape=(4, 128, 128), dtype=torch.bfloat16)
+   b = Tensor(shape=(128, 128, 512), dtype=torch.bfloat16)
+Warning: please use at least NVCC 12.9 for the best DeepGEMM performance
+NVCC compilation failed: In file included from /root/.deep_gemm/tmp/2446-21a7bcca-51f88939-da3ecdb3/kernel.cu:3:
+/workspace/deepgemm/deep_gemm/include/deep_gemm/impls/sm90_bf16_gemm.cuh:396:109: error: extended character 。 is not valid in an identifier
+  396 | `deep_gemm/include/deep_gemm/impls/sm90_bf16_gemm.cuh` 实现了 Hopper（SM90）架构上 BF16 矩阵乘法的核心 CUDA kernel。下面按文件结构逐段、逐行解释。
+      |                                                                                                             ^
+/workspace/deepgemm/deep_gemm/include/deep_gemm/impls/sm90_bf16_gemm.cuh:396:109: error: extended character 、 is not valid in an identifier
+/workspace/deepgemm/deep_gemm/include/deep_gemm/impls/sm90_bf16_gemm.cuh:396:109: error: extended character 。 is not valid in an identifier
+/workspace/deepgemm/deep_gemm/include/deep_gemm/impls/sm90_bf16_gemm.cuh:405:1: error: extended character 。 is not valid in an identifier
+  405 | 标准头文件保护，防止重复包含。
+      | ^
+/workspace/deepgemm/deep_gemm/include/deep_gemm/impls/sm90_bf16_gemm.cuh:411:16: error: extended character “ is not valid in an identifier
+  411 | 保存当前 clang 诊断状态，并忽略“未知属性”警告。CUDA 的 `__grid_constant__` 等属性在 clang 编译时可能会触发此警告，这里选择静默。
+      |                ^
+/workspace/deepgemm/deep_gemm/include/deep_gemm/impls/sm90_bf16_gemm.cuh:411:16: error: extended character ” is not valid in an identifier
+/workspace/deepgemm/deep_gemm/include/deep_gemm/impls/sm90_bf16_gemm.cuh:411:16: error: extended character 。 is not valid in an identifier
+/workspace/deepgemm/deep_gemm/include/deep_gemm/impls/sm90_bf16_gemm.cuh:411:91: error: extended character 。 is not valid in an identifier
+  411 | 保存当前 clang 诊断状态，并忽略“未知属性”警告。CUDA 的 `__grid_constant__` 等属性在 clang 编译时可能会触发此警告，这里选择静默。
+      |                                                                                           ^
+/workspace/deepgemm/deep_gemm/include/deep_gemm/impls/sm90_bf16_gemm.cuh:417:38: error: extended character 。 is not valid in an identifier
+  417 | - `barrier.h`：CUTLASS 的 mbarrier / 命名屏障实现。
+      |                                      ^
+/workspace/deepgemm/deep_gemm/include/deep_gemm/impls/sm90_bf16_gemm.cuh:418:105: error: extended character 。 is not valid in an identifier
+  418 | - `reg_reconfig.h`：warp group 级别的寄存器重新分配接口（`warpgroup_reg_alloc` / `warpgroup_reg_dealloc`）。
+      |                                                                                                         ^
+/workspace/deepgemm/deep_gemm/include/deep_gemm/impls/sm90_bf16_gemm.cuh:426:27: error: extended character 。 is not valid in an identifier
+  426 | - `cluster_sm90.hpp`：CTA 集群（cluster）同步原语。
+      |                           ^
+/workspace/deepgemm/deep_gemm/include/deep_gemm/impls/sm90_bf16_gemm.cuh:427:69: error: extended character 。 is not valid in an identifier
+  427 | - `copy_sm90_desc.hpp` / `copy_sm90_tma.hpp`：TMA 描述符与 TMA copy 指令封装。
+      |                                                                     ^
+/workspace/deepgemm/deep_gemm/include/deep_gemm/impls/sm90_bf16_gemm.cuh:428:58: error: extended character 。 is not valid in an identifier
+  428 | - `mma_sm100_desc.hpp`：WGMMA 描述符相关类型（虽然名字带 sm100，但这里用于描述符构造）。
+      |                                                          ^
+/workspace/deepgemm/deep_gemm/include/deep_gemm/impls/sm90_bf16_gemm.cuh:444:21: error: extended character 。 is not valid in an identifier
+  444 | - `comm/barrier.cuh`：集群级同步封装。
+      |                     ^
+/workspace/deepgemm/deep_gemm/include/deep_gemm/impls/sm90_bf16_gemm.cuh:445:48: error: extended character 、 is not valid in an identifier
+  445 | - `common/math.cuh` / `utils.cuh` / `types.cuh`：数学工具、类型别名、通用辅助。
+      |                                                ^
+/workspace/deepgemm/deep_gemm/include/deep_gemm/impls/sm90_bf16_gemm.cuh:445:48: error: extended character 、 is not valid in an identifier
+/workspace/deepgemm/deep_gemm/include/deep_gemm/impls/sm90_bf16_gemm.cuh:445:48: error: extended character 。 is not valid in an identifier
+/workspace/deepgemm/deep_gemm/include/deep_gemm/impls/sm90_bf16_gemm.cuh:446:46: error: extended character 。 is not valid in an identifier
+  446 | - `common/tma_copy.cuh`：项目自己的 TMA copy 封装。
+      |                                              ^
+/workspace/deepgemm/deep_gemm/include/deep_gemm/impls/sm90_bf16_gemm.cuh:447:30: error: extended character 。 is not valid in an identifier
+  447 | - `mma/sm90.cuh`：SM90 WGMMA 描述符构造与选择器。
+      |                              ^
+/workspace/deepgemm/deep_gemm/include/deep_gemm/impls/sm90_bf16_gemm.cuh:448:42: error: extended character 、 is not valid in an identifier
+  448 | - `epilogue/transform.cuh`：输出变换（如 swizzling、类型转换）。
+      |                                          ^
+/workspace/deepgemm/deep_gemm/include/deep_gemm/impls/sm90_bf16_gemm.cuh:448:42: error: extended character 。 is not valid in an identifier
+/workspace/deepgemm/deep_gemm/include/deep_gemm/impls/sm90_bf16_gemm.cuh:449:71: error: extended character 、 is not valid in an identifier
+  449 | - `ptx/ld_st.cuh` / `utils.cuh` / `wgmma.cuh`：PTX 内联汇编函数（加载/存储、WGMMA fence、操作数 fence）。
+      |                                                                       ^
+/workspace/deepgemm/deep_gemm/include/deep_gemm/impls/sm90_bf16_gemm.cuh:449:83: error: extended character 、 is not valid in an identifier
+  449 | - `ptx/ld_st.cuh` / `utils.cuh` / `wgmma.cuh`：PTX 内联汇编函数（加载/存储、WGMMA fence、操作数 fence）。
+      |                                                                                   ^
+/workspace/deepgemm/deep_gemm/include/deep_gemm/impls/sm90_bf16_gemm.cuh:449:97: error: extended character 。 is not valid in an identifier
+  449 | - `ptx/ld_st.cuh` / `utils.cuh` / `wgmma.cuh`：PTX 内联汇编函数（加载/存储、WGMMA fence、操作数 fence）。
+      |                                                                                                 ^
+/workspace/deepgemm/deep_gemm/include/deep_gemm/impls/sm90_bf16_gemm.cuh:450:52: error: extended character 。 is not valid in an identifier
+  450 | - `scheduler/gemm.cuh`：block 调度器，决定当前 CTA 计算哪个输出块。
+      |                                                    ^
+/workspace/deepgemm/deep_gemm/include/deep_gemm/impls/sm90_bf16_gemm.cuh:455:18: error: extended character 。 is not valid in an identifier
+  455 | 进入 `deep_gemm` 命名空间。
+      |                  ^
+
+Traceback (most recent call last):
+  File "/workspace/deepgemm/tests/test_einsum_one.py", line 70, in <module>
+    main()
+  File "/workspace/deepgemm/tests/test_einsum_one.py", line 65, in main
+    test_fn()
+  File "/workspace/deepgemm/tests/test_einsum.py", line 113, in test_bhd_hdr_bhr
+    deep_gemm.einsum('bhd,hdr->bhr', x, y, z)
+RuntimeError: Assertion error (csrc/apis/../jit_kernels/impls/../../jit/compiler.hpp:228): false and "NVCC compilation failed"
+[test_einsum test_fp8_bhr_hdr_bhd #0] (8, 4096, 1024, 4)
+Testing FP8 "bhr, hdr -> bhd":
+ fp8_einsum inputs:
+   equation = 'bhr,hdr->bhd'
+   a = (Tensor(shape=(4, 8, 4096), dtype=torch.float8_e4m3fn), Tensor(shape=(4, 8, 32), dtype=torch.float32))
+   b = (Tensor(shape=(8, 1024, 4096), dtype=torch.float8_e4m3fn), Tensor(shape=(8, 8, 32), dtype=torch.float32))
+Warning: please use at least NVCC 12.9 for the best DeepGEMM performance
+ fp8_einsum outputs:
+   z = Tensor(shape=(4, 8, 1024), dtype=torch.bfloat16)
+
+
+[test_fp8_fp4 test_gemm #0] (<KernelType.Kernel1D2D: 1>, <generators.QuantConfig object at 0x77e8ff926540>, 128, 512, 512, <MajorTypeAB.KMajor: 0>, <MajorTypeAB.KMajor: 0>, False, torch.bfloat16)
+Testing GEMM:
+ fp8_fp4_gemm_nt inputs:
+   a = (Tensor(shape=(128, 512), dtype=torch.float8_e4m3fn), Tensor(shape=(128, 4), dtype=torch.float32))
+   b = (Tensor(shape=(512, 512), dtype=torch.float8_e4m3fn), Tensor(shape=(4, 4), dtype=torch.float32))
+   c = None
+   disable_ue8m0_cast = True
+   recipe = None
+   recipe_a = None
+   recipe_b = None
+Warning: please use at least NVCC 12.9 for the best DeepGEMM performance
+ fp8_fp4_gemm_nt outputs:
+   d = Tensor(shape=(128, 512), dtype=torch.bfloat16)
+Traceback (most recent call last):
+  File "/workspace/deepgemm/tests/test_fp8_fp4_one.py", line 79, in <module>
+    main()
+  File "/workspace/deepgemm/tests/test_fp8_fp4_one.py", line 72, in main
+    test_fn(map_alias(int(args[1])))
+  File "/workspace/deepgemm/tests/test_fp8_fp4.py", line 74, in test_gemm
+    print(f"Average FP8xFP8 GEMM speedup over cuBLASLt: {float(np.prod(scores)) ** (1.0 / len(scores)):.3f}x\n")
+                                                                                    ~~~~^~~~~~~~~~~~~
+ZeroDivisionError: float division by zero
+[test_fp8_fp4 test_m_grouped_gemm_contiguous #0] (<KernelType.Kernel1D2D: 1>, <generators.QuantConfig object at 0x7e511f507650>, 4, 256, 512, 512, <MajorTypeAB.KMajor: 0>, <MajorTypeAB.KMajor: 0>, True, False)
+Testing m-grouped contiguous GEMM:
+ m_grouped_fp8_fp4_gemm_nt_contiguous inputs:
+   a = (Tensor(shape=(1280, 512), dtype=torch.float8_e4m3fn), Tensor(shape=(1280, 4), dtype=torch.float32))
+   b = (Tensor(shape=(4, 512, 512), dtype=torch.float8_e4m3fn), Tensor(shape=(4, 4, 4), dtype=torch.float32))
+   grouped_layout = Tensor(shape=(4,), dtype=torch.int32)
+   disable_ue8m0_cast = True
+   use_psum_layout = True
+   ensure_zero_padding = False
+   recipe = None
+   recipe_a = None
+   recipe_b = None
+Warning: please use at least NVCC 12.9 for the best DeepGEMM performance
+ m_grouped_fp8_fp4_gemm_nt_contiguous outputs:
+   d = Tensor(shape=(1280, 512), dtype=torch.bfloat16)
+
+
+Traceback (most recent call last):
+  File "/workspace/deepgemm/tests/test_fp8_fp4_one.py", line 79, in <module>
+    main()
+  File "/workspace/deepgemm/tests/test_fp8_fp4_one.py", line 46, in main
+    enum_name, test_fn, map_alias = SUITES[name]
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ValueError: not enough values to unpack (expected 3, got 2)
+Traceback (most recent call last):
+  File "/workspace/deepgemm/tests/test_fp8_fp4_one.py", line 79, in <module>
+    main()
+  File "/workspace/deepgemm/tests/test_fp8_fp4_one.py", line 46, in main
+    enum_name, test_fn, map_alias = SUITES[name]
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ValueError: not enough values to unpack (expected 3, got 2)
+[test_hyperconnection test_hc_prenorm_gemm #0] m=13, n=24, k=28672, num_splits=None
+Testing hyperconnection prenorm GEMM:
+ tf32_hc_prenorm_gemm inputs:
+   a = Tensor(shape=(13, 28672), dtype=torch.bfloat16)
+   b = Tensor(shape=(24, 28672), dtype=torch.float32)
+   num_splits = None
+Warning: please use at least NVCC 12.9 for the best DeepGEMM performance
+ tf32_hc_prenorm_gemm outputs:
+   d = Tensor(shape=(13, 24), dtype=torch.float32)
+   s = Tensor(shape=(13,), dtype=torch.float32)
+Traceback (most recent call last):
+  File "/workspace/deepgemm/tests/test_hyperconnection_one.py", line 47, in <module>
+    main()
+  File "/workspace/deepgemm/tests/test_hyperconnection_one.py", line 43, in main
+    test_hyperconnection.test_hc_prenorm_gemm()
+  File "/workspace/deepgemm/deep_gemm/testing/utils.py", line 16, in wrapper
+    func(*args, **kwargs)
+  File "/workspace/deepgemm/tests/test_hyperconnection.py", line 51, in test_hc_prenorm_gemm
+    assert diff < 1e-8, f'{m=}, {n=}, {k=}, {diff:.10f}'
+           ^^^^^^^^^^^
+AssertionError: m=13, n=24, k=28672, 0.0000000237
+[test_layout test_sf_layout_kernels #0] (512, 128, True, False, 1, 128)
+Testing SF layout kernels:
+ get_mn_major_tma_aligned_tensor inputs:
+   fp32_sf = Tensor(shape=(512, 1), dtype=torch.float32)
+Warning: please use at least NVCC 12.9 for the best DeepGEMM performance
+ get_mn_major_tma_aligned_tensor outputs:
+   transposed_sf = Tensor(shape=(512, 1), dtype=torch.float32)
+Traceback (most recent call last):
+  File "/workspace/deepgemm/tests/test_layout_one.py", line 69, in <module>
+    main()
+  File "/workspace/deepgemm/tests/test_layout_one.py", line 64, in main
+    test_fn()
+  File "/workspace/deepgemm/tests/test_layout.py", line 80, in test_sf_layout_kernels
+    assert torch.equal(fp32_sf, transposed_sf)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+RuntimeError: Expected all tensors to be on the same device, but got other is on cuda:0, different from other tensors on cpu (when checking argument in method wrapper_CUDA__equal)
+[test_layout test_k_grouped_sf_layout_kernels #0] (512, [128, 128, 256, 256], 4, 128)
+Testing k-grouped SF layout kernels:
+ get_k_grouped_mn_major_tma_aligned_packed_ue8m0_tensor inputs:
+   fp32_sf = Tensor(shape=(6, 512), dtype=torch.float32)
+   grouped_layout = Tensor(shape=(4,), dtype=torch.int32)
+   ks_cpu = (128, 128, 256, 256)
+   gran_k = 128
+   tile_size_k = 128
+Warning: please use at least NVCC 12.9 for the best DeepGEMM performance
+ get_k_grouped_mn_major_tma_aligned_packed_ue8m0_tensor outputs:
+   packed_sf = Tensor(shape=(4, 512), dtype=torch.int32)
+
+
+[test_layout test_k_grouped_psum_sf_layout_kernels #0] (512, [128, 320, 128, 192], [128, 384, 128, 256], [128, 448, 640, 832], 4, 128, 128)
+Testing k-grouped psum SF layout kernels:
+ > Skipped (psum SF pack kernel only supported on SM100)
+
+[test_legacy test_m_grouped_gemm_contiguous_tl #0] (<KernelType.KernelNoSF: 2>, None, 4, 256, 512, 512, <MajorTypeAB.KMajor: 0>, <MajorTypeAB.KMajor: 0>, True, False)
+Traceback (most recent call last):
+  File "/workspace/deepgemm/tests/test_legacy_one.py", line 81, in <module>
+    main()
+  File "/workspace/deepgemm/tests/test_legacy_one.py", line 76, in main
+    test_fn(mapping_fn(int(args[1])))
+TypeError: test_m_grouped_gemm_contiguous_tl() missing 1 required positional argument: 'test_alias'
+[test_legacy test_k_grouped_gemm_contiguous_tl #0] (4, 256, 512, <MajorTypeAB.MNMajor: 1>, <MajorTypeAB.MNMajor: 1>, [108, 152, 131, 128], [128, 256, 256, 128], 128, 128, 128, False)
+Testing k-grouped contiguous Triton GEMM:
+ a_fused_k_grouped_bf16_gemm_tn_contiguous_tl inputs:
+   a = Tensor(shape=(768, 256), dtype=torch.bfloat16)
+   b = Tensor(shape=(768, 512), dtype=torch.bfloat16)
+   c = Tensor(shape=(4, 256, 512), dtype=torch.float32)
+   grouped_indices = (Tensor(shape=(768,), dtype=torch.int32), Tensor(shape=(4,), dtype=torch.int32), Tensor(shape=(4,), dtype=torch.int32))
+   accumulate = True
+ a_fused_k_grouped_bf16_gemm_tn_contiguous_tl outputs:
+   c = Tensor(shape=(4, 256, 512), dtype=torch.float32)

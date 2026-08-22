@@ -32,8 +32,8 @@ def map_index_to_test_alias(index) -> bool:
 SUITES = {
     'test_gemm':                      ('enumerate_normal',                             test_fp8_fp4.test_gemm,                      map_index_to_test_alias),
     'test_m_grouped_gemm_contiguous': ('enumerate_m_grouped_contiguous',               test_fp8_fp4.test_m_grouped_gemm_contiguous, map_index_to_test_alias),
-    'test_m_grouped_gemm_masked':     ('enumerate_m_grouped_masked',                   test_fp8_fp4.test_m_grouped_gemm_masked),
-    'test_k_grouped_gemm_contiguous': ('enumerate_k_grouped_contiguous_with_variants', test_fp8_fp4.test_k_grouped_gemm_contiguous),
+    'test_m_grouped_gemm_masked':     ('enumerate_m_grouped_masked',                   test_fp8_fp4.test_m_grouped_gemm_masked,     None),
+    'test_k_grouped_gemm_contiguous': ('enumerate_k_grouped_contiguous_with_variants', test_fp8_fp4.test_k_grouped_gemm_contiguous, None),
 }
 
 def main() -> None:

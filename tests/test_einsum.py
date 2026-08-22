@@ -41,7 +41,8 @@ def test_bmk_bnk_mn() -> None:
     for s, m, n, k, dtype in enumerate_bmk_bnk_mn():
         a = torch.randn((s, m, k), dtype=torch.bfloat16, device='cpu')
         b = torch.randn((s, n, k), dtype=torch.bfloat16, device='cpu')
-        d = torch.randn((m, n), dtype=dtype, device='cpu')
+        # d = torch.randn((m, n), dtype=dtype, device='cpu') #RuntimeError: Assertion error (csrc/apis/einsum.hpp:27): c->data_ptr() == d.data_ptr() and c->sizes() == d.sizes() and c->strides() == d.strides()
+        d = torch.empty((m, n), dtype=dtype, device='cpu').contiguous()
         c = d if dtype == torch.float else None
 
         # Test correctness
