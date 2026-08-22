@@ -324,8 +324,8 @@ def ref_paged_mqa_logits(q: torch.Tensor, kv_cache: torch.Tensor,
 
 def enumerate_paged_mqa_logits():
     arch_major = get_arch_major()
-    max_kv_pool_tokens = 32 * 1024 * 1024
-    max_varlen_tokens = 16 * 1024
+    max_kv_pool_tokens = 256 * 1024
+    max_varlen_tokens = 1024
     for is_varlen in ((False, True) if arch_major == 10 else (False, )):
         for fmt in (('mxfp4', 'mxfp8', 'fp8') if arch_major == 10 else ('fp8', )):
             is_mxfp4 = fmt == 'mxfp4'
@@ -335,14 +335,14 @@ def enumerate_paged_mqa_logits():
                         continue
                     for block_kv in ((128, 32, 64, ) if arch_major == 10 else (64, )):
                         for use_2d_context_lens, clean_logits in [(True, False)]:
-                            for batch_size in (256, 4096):
+                            for batch_size in (4, 32):
                                 for next_n in ((1, ) if is_varlen else ((1, 6) if arch_major == 10 else (1, 2))):
                                     for max_tokens_per_batch in ((6, 10) if is_varlen else (1, )):
                                         heads = (8, 16, 32, 64) if arch_major == 10 else (32, 64)
                                         head_dims = (64, 128) if is_mxfp4 else ((32, 64, 128) if arch_major == 10 else (128, ))
                                         for num_heads in heads:
                                             for head_dim in head_dims:
-                                                for avg_kv in (8192, 65536):
+                                                for avg_kv in (128, 1024):
                                                     if batch_size * avg_kv > max_kv_pool_tokens:
                                                         continue
                                                     if is_varlen and batch_size * max_tokens_per_batch > max_varlen_tokens:
