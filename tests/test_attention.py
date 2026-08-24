@@ -483,10 +483,17 @@ def test_paged_mqa_logits():
         assert block_table.min().item() >= 0
         assert block_table.max().item() < num_total_blocks
         assert context_lens_nextn.max().item() <= max_model_len
+        # The metadata kernel runs on the GPU, so its inputs must be CUDA tensors.
+        # We move the resulting metadata back to CPU so the rest of the test stays
+        # consistent with the CPU-only data design.
+        schedule_meta = deep_gemm.get_paged_mqa_logits_metadata(
+            context_lens_nextn.cuda(), block_kv, deep_gemm.get_num_sms(),
+            indices=indices.cuda() if indices is not None else None
+        ).cpu()
         kernel_kwargs = dict(
             q=q_in, kv_cache=kv_in, weights=kernel_weights,
             context_lens=context_lens_nextn, block_table=block_table,
-            schedule_meta=deep_gemm.get_paged_mqa_logits_metadata(context_lens_nextn, block_kv, deep_gemm.get_num_sms(), indices=indices),
+            schedule_meta=schedule_meta,
             max_context_len=max_model_len, clean_logits=clean_logits, logits_dtype=logits_dtype,
             indices=indices,
         )
