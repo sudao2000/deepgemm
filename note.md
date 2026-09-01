@@ -784,10 +784,69 @@ uint32_t advance_gmma_desc_lo(const uint32_t& base, const uint32_t& mn_idx, cons
 ---
 ---
 
+1. Standard Batched GEMM (Non-Contiguous, Variable Dimensions)
+
+Problem 0: A0 [M0 x K0]  *  B0 [K0 x N0]  =  C0 [M0 x N0]
+Problem 1: A1 [M1 x K1]  *  B1 [K1 x N1]  =  C1 [M1 x N1]
+Problem 2: A2 [M2 x K2]  *  B2 [K2 x N2]  =  C2 [M2 x N2]
+
+Memory Layout (Scattered Pointers):
+A0: [addr_a0] -> +----+
+                 |    | K0
+                 +----+ M0
+A1: [addr_a1] -> +------+
+                 |      | K1
+                 +------+ M1
+
+2. K-Grouped Contiguous GEMM
+
+Logical Operation: C [M x N] = A [M x K_total] * B [K_total x N]
+
+Where K_total = K0 + K1 + K2
+
+Group 0: C += A[K0_slice] * B[K0_slice]
+Group 1: C += A[K1_slice] * B[K1_slice]
+Group 2: C += A[K2_slice] * B[K2_slice]
+
++---------------------------------------+
+| Matrix A [M x K_total] (Contiguous)   |
++---------------------------------------+
+| +-----------+---------+-------------+ |
+| |  A_group0 | A_group1|  A_group2   | |
+| | [M x K0]  | [M x K1]|  [M x K2]   | |
+| +-----------+---------+-------------+ |
++---------------------------------------+
+
++---------------------------------------+
+| Matrix B [K_total x N] (Contiguous)   |
++---------------------------------------+
+| +-----------+ B_group0 [K0 x N]      | |
+| +-----------+---------+              | |
+| |           | B_group1 [K1 x N]      | |
+| +-----------+---------+-------------+ |
+| |                       | B_group2   | |
+| |                       | [K2 x N]   | |
+| +-----------+---------+-------------+ |
++---------------------------------------+
+
+           => Accumulates into =>
+
++-------------------+
+| Matrix C [M x N]  |
+| (Initialized to 0 |
+|  or previous val) |
++-------------------+
+
+
 
 ---
 ---
 
+cudaGridDependencySynchronize() 就是为了解决这个问题而引入的（特别是在 NVIDIA Hopper 架构及更新的 CUDA 版本中）。它允许 Kernel B 在执行过程中暂停，直到 Kernel A 完全结束。
+
+https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/programmatic-dependent-launch.html
+
+[cudaGridDependencySynchronize]: https://docs.nvidia.com/cuda/cuda-programming-guide/_images/preamble-overlap.png
 
 ---
 ---
