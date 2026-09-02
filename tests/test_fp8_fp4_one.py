@@ -13,10 +13,11 @@ Usage:
     python tests/test_fp8_fp4_one.py <suite> all          # run all cases (same as test_fp8_fp4.py)
 
 Suites:
-    gemm          (test_gemm)
-    m_contiguous  (test_m_grouped_gemm_contiguous)
-    m_masked      (test_m_grouped_gemm_masked)
-    k_contiguous  (test_k_grouped_gemm_contiguous)
+    gemm                    (test_gemm)
+    gemm_llm_layer_shapes   (test_gemm_llm_layer_shapes)
+    m_contiguous            (test_m_grouped_gemm_contiguous)
+    m_masked                (test_m_grouped_gemm_masked)
+    k_contiguous            (test_k_grouped_gemm_contiguous)
 """
 
 import random
@@ -31,6 +32,7 @@ def map_index_to_test_alias(index) -> bool:
 
 SUITES = {
     'test_gemm':                      ('enumerate_normal',                             test_fp8_fp4.test_gemm,                      map_index_to_test_alias),
+    'test_gemm_llm_layer_shapes':     ('enumerate_gemm_llm_layer_shapes',                test_fp8_fp4.test_gemm_llm_layer_shapes,     None),
     'test_m_grouped_gemm_contiguous': ('enumerate_m_grouped_contiguous',               test_fp8_fp4.test_m_grouped_gemm_contiguous, map_index_to_test_alias),
     'test_m_grouped_gemm_masked':     ('enumerate_m_grouped_masked',                   test_fp8_fp4.test_m_grouped_gemm_masked,     None),
     'test_k_grouped_gemm_contiguous': ('enumerate_k_grouped_contiguous_with_variants', test_fp8_fp4.test_k_grouped_gemm_contiguous, None),

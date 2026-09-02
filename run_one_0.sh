@@ -28,6 +28,8 @@ PYTHONPATH=. python tests/test_einsum_one.py test_fp8_bhr_hdr_bhd 0
 
 PYTHONPATH=. python tests/test_fp8_fp4_one.py test_gemm 0
 # PYTHONPATH=. python tests/test_fp8_fp4_one.py test_gemm 1
+PYTHONPATH=. python tests/test_fp8_fp4_one.py test_gemm_llm_layer_shapes 0
+# PYTHONPATH=. python tests/test_fp8_fp4_one.py test_gemm_llm_layer_shapes 1
 PYTHONPATH=. python tests/test_fp8_fp4_one.py test_m_grouped_gemm_contiguous 0
 # PYTHONPATH=. python tests/test_fp8_fp4_one.py test_m_grouped_gemm_contiguous 1
 PYTHONPATH=. python tests/test_fp8_fp4_one.py test_m_grouped_gemm_masked 0

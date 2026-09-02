@@ -160,6 +160,16 @@ def enumerate_normal(dtype: torch.dtype) -> Generator:
             yield override_kernel_type, quant_config, n_bwd, m_bwd, k_bwd, override_major,     override_major, False, torch.bfloat16     # Wgrad
 
 
+def enumerate_gemm_llm_layer_shapes(dtype: torch.dtype) -> Generator:
+    # Single small case for fast execution (M=8)
+    m = 8
+    for name, n, k in [('qkv_proj', 8192, 5120),
+                       ('o_proj', 6144, 6144),
+                       ('gate_up_proj', 34816, 5120),
+                       ('down_proj', 5120, 17408)]:
+        yield m, name, n, k
+
+
 def enumerate_m_grouped_contiguous(dtype: torch.dtype) -> Generator:
     quant_config_list = QuantConfig.get_list_from_dtype(dtype)
     # Single small case for fast execution

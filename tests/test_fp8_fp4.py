@@ -14,8 +14,8 @@ from utils import (
 )
 
 from generators import (
-    KernelType, get_ue8m0_usage, layout_masked_to_psum, align,
-    enumerate_normal, enumerate_m_grouped_contiguous, enumerate_m_grouped_masked,
+    KernelType, QuantConfig, MajorTypeAB, get_kernel_types, get_ue8m0_usage, layout_masked_to_psum, align,
+    enumerate_normal, enumerate_gemm_llm_layer_shapes, enumerate_m_grouped_contiguous, enumerate_m_grouped_masked,
     enumerate_k_grouped_contiguous_with_variants,
     generate_normal, generate_m_grouped_contiguous, generate_m_grouped_masked, generate_k_grouped_contiguous,
     generate_k_grouped_contiguous_psum,
@@ -312,6 +312,36 @@ def test_k_grouped_gemm_contiguous() -> None:
                 f'{count_bytes(a, b, c, d) / 1e9 / t:4.0f} GB/s')
     print()
 
+def test_gemm_llm_layer_shapes() -> None:
+    print('Testing GEMM with LLM layer shapes (M=8):')
+    kernel_type = get_kernel_types(torch.float8_e4m3fn)[0]
+    quant_config = QuantConfig()
+    use_ue8m0 = get_ue8m0_usage(kernel_type)
+    disable_ue8m0_cast = not use_ue8m0
+    recipe, recipe_a, recipe_b = quant_config.get_recipes()
+
+    # (name, n, k) with m=8; A: 1x128 per-token SF (m, k/128), B: 128x128 blockwise SF (n/128, k/128)
+    for m, name, n, k in enumerate_gemm_llm_layer_shapes(torch.float8_e4m3fn):
+        a, b, c, d, ref_d = generate_normal(m, n, k, MajorTypeAB.KMajor, MajorTypeAB.KMajor,
+                                            False, torch.bfloat16, kernel_type,
+                                            use_ue8m0=use_ue8m0, quant_config=quant_config)
+        print(f'a.shape={a[1].shape}, a.dtype={a[1].dtype}, b.shape={b[1].shape}, b.dtype={b[1].dtype}, d.shape={d.shape}, d.dtype={d.dtype}')
+        assert a[1].shape == (m, k // 128) and b[1].shape == (n // 128, k // 128)
+        with _CudaClosureContext(lambda: deep_gemm.fp8_gemm_nt(a, b, d, c=c, disable_ue8m0_cast=disable_ue8m0_cast,
+                                                                recipe=recipe, recipe_a=recipe_a, recipe_b=recipe_b),
+                                    tensor_vars=('a', 'b', 'd', 'c')):
+            deep_gemm.fp8_gemm_nt(a, b, d, c=c, disable_ue8m0_cast=disable_ue8m0_cast,
+                                  recipe=recipe, recipe_a=recipe_a, recipe_b=recipe_b)
+        diff = calc_diff(d, ref_d)
+        assert diff < quant_config.max_diff(), f'{name}: {m=}, {n=}, {k=}, {diff:.5f}'
+
+        t = bench_kineto(lambda: deep_gemm.fp8_gemm_nt(a, b, d, c=c, disable_ue8m0_cast=disable_ue8m0_cast,
+                                                       recipe=recipe, recipe_a=recipe_a, recipe_b=recipe_b),
+                         'gemm_', tensor_vars=('a', 'b', 'c', 'd'),
+                         suppress_kineto_output=True)
+        print(f' > {name:12} (m={m}, n={n:6}, k={k:6}): {t * 1e6:6.1f} us | '
+              f'{2 * m * n * k / t / 1e12:4.0f} TFLOPS | {count_bytes(a, b, d) / 1e9 / t:4.0f} GB/s')
+    print()
 
 if __name__ == '__main__':
     torch.manual_seed(0)
@@ -321,6 +351,7 @@ if __name__ == '__main__':
     print(f' > {deep_gemm.__path__}\n')
 
     test_gemm()
+    test_gemm_llm_layer_shapes()
     test_m_grouped_gemm_contiguous()
     test_m_grouped_gemm_masked()
     test_k_grouped_gemm_contiguous()
