@@ -851,6 +851,100 @@ https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/programmat
 ---
 ---
 
+## 288~289 行代码
+
+```cpp
+#pragma unroll
+for (int i = 0; i < WGMMA::kNumAccum / 4; ++i)
+    scales_b[i] = ptx::ld_shared(reinterpret_cast<float2*>(smem_sfb[stage_idx] + i * 8 + col_idx * 2));
+```
+
+作用：**在当前 pipeline stage 的 smem 中，把本线程负责的 B 列 scale（每列一个 float）批量读到寄存器 `scales_b[]` 里**，供 313~319 行做 `final_accum += scale_a * scale_b * accum` 的反量化提升。
+
+## 1. 读取对象：`smem_sfb[stage]` 是什么
+
+```
+smem_sfb[stage_idx] ──> float*，长度为 BLOCK_N 的一维数组
+                        （1d1d kernel：B 是 per-channel 量化，每列 N 一个 scale）
+
+        列 n:   0    1    2    3   ...  BLOCK_N-1
+              ┌────┬────┬────┬────┬───┬────────┐
+ smem_sfb:    │f32 │f32 │f32 │f32 │...│  f32   │   由 TMA 在 230 行拷入
+              └────┴────┴────┴────┴───┴────────┘
+```
+
+数据来源对应 229~230 行：`tma::copy<BLOCK_N, BLOCK_K, 0>(&tensor_map_sfb, ..., n_idx, sf_k_idx, ...)`。
+
+## 2. 地址解析：`i * 8 + col_idx * 2`，一次读 float2
+
+循环次数：`WGMMA::kNumAccum = 64 × BLOCK_N / 128 = BLOCK_N/2`，所以 `i ∈ [0, BLOCK_N/8)`。
+
+结合上一问的 fragment 布局（线程按 `col_idx ∈ [0,4)` 各管 2 列，列方向每 8 列一组循环）：
+
+```
+smem_sfb  viewed as BLOCK_N/8 个 "8 列组":
+
+   i=0 组           i=1 组            i=2 组        ...
+ ┌──────────────┬──────────────┬──────────────┬───
+ │ 0  1  2  3  4 │ 8  9 10 11 12│16 17 18 19 20│
+ │ 5  6  7  *  * │13 14 15  *  *│...
+ └──────────────┴──────────────┴──────────────┴───
+   ↑   ↑   ↑   ↑    ↑   ↑   ↑   ↑
+  每 8 列一组内，4 个 col_idx 各取相邻的 float2:
+
+  col_idx=0 ──读 [0,1]    ──> i=1 时读 [8, 9]
+  col_idx=1 ──读 [2,3]    ──> i=1 时读 [10,11]
+  col_idx=2 ──读 [4,5]    ──> i=1 时读 [12,13]
+  col_idx=3 ──读 [6,7]    ──> i=1 时读 [14,15]
+
+  地址(以 float 计) = i*8 + col_idx*2，即 列号 {i*8+col_idx*2, +1}
+```
+
+`reinterpret_cast<float2*>` + `ptx::ld_shared(float2*)` 生成的是一条 **`ld.shared.v2.f32`**（8 字节向量加载，`ld_st.cuh:108-112`），一条指令恰好抓走该线程在这一 8 列组里负责的**相邻 2 列的 scale**——与 WGMMA fragment 中该线程持有的 `accum[i*4+0..1]`（列 `i*8+col_idx*2`、`*2+1`）精确对齐。
+
+## 3. 一个 warp 的读取全景
+
+```
+32 lane 同时读同一个 8 列组（i 固定）:
+
+              col_idx=0   col_idx=1   col_idx=2   col_idx=3
+             ┌─────────┬─────────┬─────────┬─────────┐
+ row_idx=0   │ float2  │ float2  │ float2  │ float2  │
+ row_idx=1   │ float2  │ float2  │ float2  │ float2  │
+    ...      │ (同一   │ 地址重复│         │         │
+ row_idx=7   │  地址)  │         │         │         │
+             └─────────┴─────────┴─────────┴─────────┘
+
+ 同一列的 scale 被 8 个不同 row_idx 的 lane 各读一次
+ → 同地址多线程读 = shared memory 广播，无 bank conflict
+```
+
+整个循环下来：每线程读 `BLOCK_N/8` 个 float2（= `BLOCK_N/4` 个 float，存入寄存器数组 `scales_b[WGMMA::kNumAccum/4]`），32 lane 合计覆盖 `8 × BLOCK_N` 次读取 = 整个 `BLOCK_N` 列的 scale 各被读 8 遍（行方向冗余）。
+
+## 4. 为什么放在这个位置（281~289 行整块）
+
+```
+时间线（单个 k_block 迭代内）:
+
+ 283  scale_a_0/1 = ld_shared(...)   ┐
+ 288  scales_b[i]  = ld_shared(...)  ├─ ① 所有 smem 读必须先完成
+     ...                             │
+ 295  warpgroup_arrive()             ┘ ② 然后才发 WGMMA
+ 297  WGMMA 发射 ...
+ 306  warpgroup_wait<0>()
+ 309  empty_barrier_arrive(stage)    ── ③ 信号一发，TMA warp 就可能用
+                                        下一个 block 的数据覆写该 stage！
+```
+
+282 行的注释说明了原因：*"all shared memory read must be prior to `warpgroup_arrive` to avoid next scheduled block polluting the results"*。scale 是 per-stage 驻留在 smem 里的，必须**提前固化到寄存器**，否则 309 行到达 empty barrier 后 TMA 复用该 stage，读到的就是下一个调度块的数据。
+
+## 5. `#pragma unroll` 的作用
+
+循环次数是编译期常量（`BLOCK_N/8`，如 BLOCK_N=128 时共 16 次），完全展开后：
+
+- 16 条 `ld.shared.v2.f32` 背靠背发射，指令开销最小；
+- 加载延迟可被后续连续的 16 次 WGMMA（297~301 行）掩盖；
+- 编译器可自由调度这些 load 与 `warpgroup_arrive` 之前的其它指令，进一步隐藏延迟。
 
 ---
 ---
