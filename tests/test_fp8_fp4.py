@@ -133,7 +133,6 @@ def test_m_grouped_gemm_contiguous(test_alias: bool) -> None:
 
             # noinspection PyShadowingNames
             def test_func():
-                (a, b, d, grouped_layout) = to_device((a, b, d, grouped_layout), 'cuda')
                 deep_gemm.m_grouped_fp8_fp4_gemm_nt_contiguous(a, b, d, grouped_layout, disable_ue8m0_cast=disable_ue8m0_cast, use_psum_layout=use_psum_layout,
                                                             ensure_zero_padding=ensure_zero_padding,
                                                             recipe=recipe, recipe_a=recipe_a, recipe_b=recipe_b)
@@ -176,8 +175,8 @@ def test_m_grouped_gemm_masked() -> None:
 
         # noinspection PyShadowingNames
         def test_func():
-            (a, b, d, masked_m) = to_device((a, b, d, masked_m), 'cuda')
-            (a_psum, d_psum, psum_m) = to_device((a_psum, d_psum, psum_m), 'cuda')
+            # (a, b, d, masked_m) = to_device((a, b, d, masked_m), 'cuda')
+            # (a_psum, d_psum, psum_m) = to_device((a_psum, d_psum, psum_m), 'cuda')
             if use_psum_layout:
                 print_kernel_io('m_grouped_fp8_fp4_gemm_nt_contiguous',
                                 dict(a=a_psum, b=b, grouped_layout=psum_m,
@@ -226,11 +225,11 @@ def test_m_grouped_gemm_masked() -> None:
                 sum_ops += 2 * valid_m * n * k
                 sum_bytes += count_bytes(a, d) * valid_m / (max_m * num_groups) + count_bytes(b)
 
-            print(f' > Perf (num_groups={num_groups:2}, expected_m_per_group={expected_m_per_group:4}, n={n:4}, k={k:4}, '
-                f'{kernel_opt}, psum={1 if use_psum_layout else 0}): '
-                f'{sum_t / num_tests * 1e6:4.0f} us (max: {max_t * 1e6:3.0f} us) | '
-                f'{sum_ops / sum_t / 1e12:4.0f} TFLOPS | '
-                f'{sum_bytes / sum_t / 1e9:4.0f} GB/s')
+                print(f' > Perf (num_groups={num_groups:2}, expected_m_per_group={expected_m_per_group:4}, n={n:4}, k={k:4}, '
+                    f'{kernel_opt}, psum={1 if use_psum_layout else 0}): '
+                    f'{sum_t / num_tests * 1e6:4.0f} us (max: {max_t * 1e6:3.0f} us) | '
+                    f'{sum_ops / sum_t / 1e12:4.0f} TFLOPS | '
+                    f'{sum_bytes / sum_t / 1e9:4.0f} GB/s')
     print()
 
 
@@ -299,7 +298,6 @@ def test_k_grouped_gemm_contiguous() -> None:
 
             # noinspection PyShadowingNames
             def test_func():
-                (a, b, c, d, grouped_layout) = to_device((a, b, c, d, grouped_layout), 'cuda')
                 k_grouped_fp8_gemm_contiguous(a, b, d, aligned_ks_cpu, grouped_layout, c, recipe=recipe, use_psum_layout=use_psum_layout)
 
             t = bench_kineto(test_func, 'gemm_',
@@ -335,12 +333,13 @@ def test_gemm_llm_layer_shapes() -> None:
         diff = calc_diff(d, ref_d)
         assert diff < quant_config.max_diff(), f'{name}: {m=}, {n=}, {k=}, {diff:.5f}'
 
-        t = bench_kineto(lambda: deep_gemm.fp8_gemm_nt(a, b, d, c=c, disable_ue8m0_cast=disable_ue8m0_cast,
-                                                       recipe=recipe, recipe_a=recipe_a, recipe_b=recipe_b),
-                         'gemm_', tensor_vars=('a', 'b', 'c', 'd'),
-                         suppress_kineto_output=True)
-        print(f' > {name:12} (m={m}, n={n:6}, k={k:6}): {t * 1e6:6.1f} us | '
-              f'{2 * m * n * k / t / 1e12:4.0f} TFLOPS | {count_bytes(a, b, d) / 1e9 / t:4.0f} GB/s')
+        if os.getenv('PERFORMANCE'):
+            t = bench_kineto(lambda: deep_gemm.fp8_gemm_nt(a, b, d, c=c, disable_ue8m0_cast=disable_ue8m0_cast,
+                                                        recipe=recipe, recipe_a=recipe_a, recipe_b=recipe_b),
+                            'gemm_', tensor_vars=('a', 'b', 'c', 'd'),
+                            suppress_kineto_output=True)
+            print(f' > {name:12} (m={m}, n={n:6}, k={k:6}): {t * 1e6:6.1f} us | '
+                f'{2 * m * n * k / t / 1e12:4.0f} TFLOPS | {count_bytes(a, b, d) / 1e9 / t:4.0f} GB/s')
     print()
 
 if __name__ == '__main__':

@@ -41,23 +41,21 @@ def test_bmk_bnk_mn() -> None:
     for s, m, n, k, dtype in enumerate_bmk_bnk_mn():
         a = torch.randn((s, m, k), dtype=torch.bfloat16, device='cpu')
         b = torch.randn((s, n, k), dtype=torch.bfloat16, device='cpu')
-        # d = torch.randn((m, n), dtype=dtype, device='cpu') #RuntimeError: Assertion error (csrc/apis/einsum.hpp:27): c->data_ptr() == d.data_ptr() and c->sizes() == d.sizes() and c->strides() == d.strides()
-        d = torch.empty((m, n), dtype=dtype, device='cpu').contiguous()
+        d = torch.empty((m, n), dtype=dtype, device='cpu')
         c = d if dtype == torch.float else None
 
         # Test correctness
         ref_d = (c if dtype == torch.float else 0) + torch.bmm(a.float(), b.float().mT).sum(0)
 
         print_kernel_io('einsum', dict(equation='bmk,bnk->mn', a=a, b=b, c=c), dict(d=d))
-        with _CudaClosureContext(lambda: deep_gemm.einsum('bmk,bnk->mn', a, b, d, c=c),
+        with _CudaClosureContext(lambda: deep_gemm.einsum('bmk,bnk->mn', a, b, d, c=d),
                                     tensor_vars=('a', 'b', 'd', 'c')):
-            deep_gemm.einsum('bmk,bnk->mn', a, b, d, c=c)
+            deep_gemm.einsum('bmk,bnk->mn', a, b, d, c=d)
         print_kernel_io('einsum', {}, dict(d=d))
         assert calc_diff(d, ref_d) < 1e-5
 
         if os.getenv('PERFORMANCE'):
-            (a, b, c, d) = to_device((a, b, c, d), 'cuda')
-            t = bench_kineto(lambda: deep_gemm.einsum('bmk,bnk->mn', a, b, d, c=c), 'bmn_bnk_mn_gemm_impl',
+            t = bench_kineto(lambda: deep_gemm.einsum('bmk,bnk->mn', a, b, d, c=d), 'bmn_bnk_mn_gemm_impl',
                             tensor_vars=('a', 'b', 'd', 'c'),
                             input_vars=('a', 'b', 'c'), output_vars=('d',), suppress_kineto_output=True)
             print(f' > Perf (b={s:4.0f}, {m=}, {n=}, {k=}, {"FP32" if dtype == torch.float else "BF16"}): ',
