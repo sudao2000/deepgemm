@@ -949,7 +949,122 @@ smem_sfb  viewed as BLOCK_N/8 个 "8 列组":
 ---
 ---
 
+## Figure 152：WGMMA `.m64nNk32` 矩阵 A 的寄存器 fragment 布局
 
+已从 `ptx_isa_9.3.pdf`（9.7.16.5.1.4 节，第 607~608 页）提取并核对该图。图的内容是一个 **64 行 × 32 列的 A 矩阵**，每个格子标注 `T<tid>{a?, a?, a?, a?}`，表示"该位置的 4 个元素由线程 tid 的哪 4 个 fragment 元素持有"。
+
+### ① 图中表格给出的 fragment 定义
+
+```
+ .atype        Fragment                          每线程元素
+ .s8/.u8       4 个 .b32 寄存器, 每个装 4 个       a0 ~ a15 (共 16 个)
+ .e4m3/.e5m2   8-bit 元素                          (64×32/128 = 16 ✓)
+```
+
+即一次 `wgmma.m64nNk32` 中，warpgroup 的 128 线程每人持有 A 的 **16 个元素**（4 个 b32 寄存器）。
+
+### ② 从图中解码出的精确映射
+
+设 `w = warp ∈ [0,4)`（warpgroup 内），`g = lane >> 2 ∈ [0,8)`（行组），`q = lane % 4 ∈ [0,4)`（列组），`tid = 32w + 4g + q`：
+
+```
+ fragment   矩阵行 (m)        矩阵列 (k = 0~31)
+ a0~a3    │ 16w + g         │ 4q + 0~3
+ a4~a7    │ 16w + g + 8     │ 4q + 0~3
+ a8~a11   │ 16w + g         │ 4q + 16~19
+ a12~a15  │ 16w + g + 8     │ 4q + 16~19
+```
+
+用 ASCII 重绘 warp 0（tid 0~31，行 0~15）部分，每格 4 列：
+
+```
+                    k: 0 ────────── 15 │ k: 16 ───────── 31
+                q=0     q=1     q=2     q=3  │ q=0      q=1      q=2      q=3
+            ┌────────┬────────┬────────┬────────┬─────────┬─────────┬─────────┬─────────┐
+ 行 0 (g=0) │T0:a0-3 │T1:a0-3 │T2:a0-3 │T3:a0-3 │T0:a8-11 │T1:a8-11 │T2:a8-11 │T3:a8-11 │
+ 行 1 (g=1) │T4:a0-3 │T5:a0-3 │T6:a0-3 │T7:a0-3 │T4:a8-11 │ ...                        │
+   ...      │        │        │        │        │          │                            │
+ 行 7 (g=7) │T28:a0-3│T29:a0-3│T30:a0-3│T31:a0-3│T28:a8-11│ ...                        │
+ 行 8 (g=0) │T0:a4-7 │T1:a4-7 │T2:a4-7 │T3:a4-7 │T0:a12-15│T1:a12-15│ ...              │
+   ...      │        │        │        │        │          │                            │
+ 行15 (g=7) │T28:a4-7│ ...    │        │        │T28:a12-15│ ...                       │
+            └────────┴────────┴────────┴────────┴─────────┴─────────┴─────────┴─────────┘
+ warp1(tid32~63)→行16~31, warp2→行32~47, warp3→行48~63 (整块复制, 行号+16w)
+
+ 图中的箭头: 表示同一寄存器组(a0~a3 / a8~a11)在同线程的两个 4 列块之间的跨度
+```
+
+可以读出三条规律：
+- **行**：每 warp 管 16 行，分 `g` 和 `g+8` 两拨（= 本 kernel 的 `r_0`/`r_1`！）；
+- **列**：每线程在 k 方向占 **4 个连续元素**（4 个 fp8 正好打包进 1 个 b32），两个 k 半区（0~15 / 16~31）由 `a0-3`/`a8-11` 分开；
+- **线程编号**：tid 按 `4g+q` 排布，同行 4 个连续 tid 铺满 16 列。
+
+### ③ 与本 kernel 的对应关系
+
+本 kernel 中 WGMMA 指令形状正是 `m64 × BLOCK_N × k32`（`FP8MMASelector` 选中，e4m3 的 K 维指令粒度 = 32）。逐项对照：
+
+```
+ Figure 152                    sm90_fp8_gemm_1d1d.cuh
+ ─────────────────────────────────────────────────────
+ 每 warp 16 行: 行 16w+g 和 16w+g+8  ──► 253行: r_0 = warp_idx*16 + row_idx
+ (g = lane>>2 = row_idx)                  r_1 = r_0 + 8        ✔ 完全同构
+
+ warpgroup 覆盖 64 行 (m64)        ──► BLOCK_M = 64×(1或2):
+                                          math_wg_idx*WGMMA::M*BLOCK_K (298行)
+                                          选本 warpgroup 的 64 行 slab
+
+ A 的行 = 输出行                   ──► 283~284行: scale_a_0/1 = smem_sfa[r_0/r_1]
+                                          per-token scale 按 A 的行索引
+
+ k32 = 1 条 wgmma 的 K 宽度        ──► 297行: for k in BLOCK_K/WGMMA::K
+                                          desc_a = smem_a + k*WGMMA::K
+                                          每条指令沿 K 前进 32 列
+```
+
+### ④ 关键区别：本 kernel 里 A 不在寄存器，而在 smem
+
+PTX ISA 9.3 的规定（9.7.16.5.1 节开头）：
+
+```
+ "The input matrix A ... can be either in registers or in the shared memory.
+  The input matrix B ... must be in the shared memory."
+```
+
+Figure 152 描述的是 **A 走寄存器路径（RS 变体）** 时的布局。但：
+
+- 本 kernel 是 **sm_90a**，fp8 的 wgmma 只支持 **SS 变体**（A、B 均经 smem 描述符），即 298~299 行的 `make_smem_desc(smem_a[...], 1)` —— A 的"fragment 分发"由硬件直接从 smem 完成，线程手里没有 a0~a15；
+- PTX ISA 9.3 把 `.e4m3/.e5m2` 也列进寄存器表，是为支持该组合的架构（如 sm_120a）定义的；**逻辑布局与 Figure 152 完全一致**，只是载体不同；
+- smem 路径下，同一逻辑布局由 **K-major swizzle atom** 物理编码（9.7.16.5.1.6 节）：fp8 的 128B swizzle 原子 = **8 行 × 16 字节**（每行 16 个 fp8 沿 K 连续），TMA 按此把 `BLOCK_M×BLOCK_K` 的 A 块写入 smem，wgmma 描述符（LBO/SBO + swizzle 模式）告诉硬件如何按 Figure 152 的逻辑位置取数：
+
+```
+ 逻辑布局 (Figure 152)              smem 物理布局 (K-major, 128B swizzle)
+ ┌─────── k: tig*4~+3 ───────┐      ┌── 16B = 16 个 fp8 沿 K ──┐
+ │ 行 16w+g  → a0~a3          │  ═►  │ core matrix: 8 行 × 16B   │ × LBO/SBO 平铺
+ │ 行 16w+g+8→ a4~a7          │      │ (行号 mod 8 决定行,        │  + 128B 异或 swizzle
+ │ k+16 半区 → a8~a11/a12~15  │      │  组内 4 fp8 = 1 个 b32)    │
+ └────────────────────────────┘      └───────────────────────────┘
+      线程↔元素的逻辑关系                TMA 写入 + desc 编码的物理关系
+```
+
+### ⑤ 为什么这个布局让 kernel 的行索引"恰好对齐"
+
+```
+              A (Figure 152)              D (Figure 153 累加器)
+              行 16w+g / 16w+g+8    ══      行 16w+g / 16w+g+8
+                     │                            │
+                     └────── 同一个 g = lane>>2 ──┘
+                                   │
+                                   ▼
+              kernel 253行: r_0 = warp*16 + row_idx, r_1 = r_0 + 8
+                    │
+                    ├──► 283行: smem_sfa[r_0/r_1]   (A 的行 scale)
+                    ├──► 316~319行: scale_a_0/1 乘 accum 的 r_0/r_1 行
+                    └──► 329行: smem_d + r_0*BLOCK_N ...   (写回 D 的行)
+```
+
+A fragment、D accumulator 的行分配共享同一套 `g / g+8` 规则，所以**一个线程在 A 侧"拥有"的行，就是它累加并写回的输出行**——`r_0`/`r_1` 因此同时服务于 scale 读取、promote 和写 D 三个环节。
+
+**一句话总结**：Figure 152 定义了 `m64nNk32` wgmma 中 A 的 64×32 逻辑块如何切给 128 线程（每线程 4 个 b32、按 `行=16w+g / +8`、`列=4q 连续 4 个` 分布）；本 kernel 的 `r_0/r_1` 正是这套行规则的镜像，只是 SM90 上 fp8 的 A 实际经 smem 描述符（SS 变体）供给，由 K-major swizzle 的 core matrix 物理编码同一逻辑布局。
 ---
 ---
 
