@@ -49,7 +49,6 @@ def test_m_grouped_gemm_contiguous_tl(expand: bool, test_alias: bool) -> None:
             m, a, b, m_indices, d, ref_d = generate_m_grouped_contiguous(num_groups, expected_m_per_group, n, k, major_a, major_b, use_bf16=True)
 
             def test_func():
-                (a, b, d, m_indices) = to_device((a, b, d, m_indices), 'cuda')
                 deep_gemm.legacy.m_grouped_bf16_gemm_nt_contiguous_tl(a, b, d, m_indices)
 
             t = bench_kineto(test_func, 'm_grouped_bf16_gemm_contiguous_tl_impl',
@@ -93,7 +92,6 @@ def test_k_grouped_gemm_contiguous_tl(fused_operand: str) -> None:
 
             # noinspection PyShadowingNames
             def test_func():
-                (a, b, c, k_indices, k_start, k_end) = to_device((a, b, c, k_indices, k_start, k_end), 'cuda')
                 deep_gemm.legacy.b_fused_k_grouped_bf16_gemm_tn_contiguous_tl(a, b, c, (k_indices, k_start, k_end), True)
 
             t = bench_kineto(test_func, 'b_fused_k_grouped_bf16_gemm_contiguous_tl_impl',
