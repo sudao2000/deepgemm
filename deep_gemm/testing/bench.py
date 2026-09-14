@@ -215,11 +215,15 @@ def bench_kineto(fn, kernel_names, num_tests: int = 1,
                     continue
                 if name == 'kernel_kwargs':
                     continue
+                try:
+                    contents = name_to_cell[name].cell_contents
+                except ValueError:
+                    continue
                 if name in output_names:
-                    io_outputs[name] = _to_cpu_for_print(name_to_cell[name].cell_contents)
+                    io_outputs[name] = _to_cpu_for_print(contents)
                     io_output_cells[name] = name_to_cell[name]
                 else:
-                    io_inputs[name] = _to_cpu_for_print(name_to_cell[name].cell_contents)
+                    io_inputs[name] = _to_cpu_for_print(contents)
 
         if return_value_as_output:
             io_outputs['return'] = _to_cpu_for_print(fn())
