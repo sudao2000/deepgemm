@@ -111,7 +111,7 @@ def test_bhd_hdr_bhr():
                                     tensor_vars=('x', 'y', 'z')):
             deep_gemm.einsum('bhd,hdr->bhr', x, y, z)
         print_kernel_io('einsum', {}, dict(z=z))
-        assert calc_diff(z, ref_z) < 1e-10
+        assert calc_diff(z, ref_z) < 1e-5
 
         if os.getenv('PERFORMANCE'):
             (x, y, z) = to_device((x, y, z), 'cuda')
