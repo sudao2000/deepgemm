@@ -89,8 +89,12 @@ class _CudaClosureContext:
             cell = name_to_cell.get(name)
             if cell is None:
                 continue
+            try:
+                contents = cell.cell_contents
+            except ValueError:
+                continue
             record = {}
-            moved = _move_tensors(cell.cell_contents, self.device, record)
+            moved = _move_tensors(contents, self.device, record)
             _set_cell(cell, moved)
             self.cell_info.append((cell, record))
         return self
